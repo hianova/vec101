@@ -2,16 +2,18 @@
 name = "vec101"
 version = "0.1.0"
 edition = "2024"
-description = "A no_std, branchless, AVX2-accelerated 1-bit weight engine for maximum efficiency."
+description = "A no_std, branchless, AVX2/NEON/GPU-accelerated 1.58-bit weight engine for maximum inference efficiency."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/example/vec101"
-keywords = ["no_std", "simd", "avx2", "machine-learning", "1-bit"]
+repository = "https://github.com/hianova/vec101"
+keywords = ["no_std", "simd", "neon", "machine-learning", "1-bit"]
+categories = ["science::machine-learning", "hardware-support", "no-std"]
+readme = "README.md"
 
 [features]
 default = ["std"]
 std = []
 gpu-metal = ["metal", "objc"]
-gpu-cuda = ["cuda-core", "cuda-device"]
+# gpu-cuda = ["cuda-core", "cuda-device"] # Uncomment for CUDA support (requires git dependency)
 gpu-vulkan = []
 gpu-wgpu = []
 
@@ -21,8 +23,8 @@ libm = "0.2.8"
 memmap2 = "0.9.10"
 safetensors = "0.7.0"
 
-cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
-cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
+# cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
+# cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = { version = "0.28", optional = true }

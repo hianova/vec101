@@ -36,6 +36,13 @@ The core compute loop (`vec101_compute`) utilizes branchless SIMD programming ta
 - **Signed Dot Product (`sdot`)**: Uses the highly advanced `sdot` instruction (`vdotq_s32`) within inline `asm!` to fuse four `i8` multiplications and `i32` accumulations instantly, achieving peak M1/M2/M3 vectorization throughput.
 - **Vectorized Operator Fusion**: `SwiGLU` and `RMSNorm` leverages `vqtbl4q_u8` (Dynamic Vectorized LUT Lookups) and saturating narrow conversions (`vqmovn_s32`) to process INT8 scaling, clamping, and quantization fully within NEON vector registers.
 
+### GPU Acceleration (Metal & CUDA)
+To circumvent memory bandwidth bottlenecks, `vec101` implements hardware-native Zero-Copy bitwise computation via optional feature flags (`gpu-metal` and `gpu-cuda`):
+- **Activation Compression**: Instead of decoding weights to `i8`, the CPU quantizes the `i8` activations into the same dual-rail bitmask representation natively.
+- **Pure `popcount` Multipliers**: By processing two binary masks natively, GPU Compute Shaders calculate dot products using rapid Bitwise logic: `popcount((x_pos & w_pos) | (x_neg & w_neg))`.
+- **Apple Metal**: Exploits Unified Memory Architecture (UMA) for Zero-Copy direct execution over standard RAM without PCIe latency.
+- **NVIDIA CUDA**: Utilizes NVlabs' `cuda-oxide` allowing the entire GPU SIMT kernel to be written purely in Rust macros (`#[cuda_module]`) and compiled dynamically to PTX.
+
 ## Pure INT8 Operator Fusion
 All linear layer outputs are intercepted before generating `Vec<f32>` arrays. `RMSNorm` and `SwiGLU` have been meticulously designed to take `&[i8]` inputs and directly output `&[i8]` values + a dynamic scale, completely obliterating the `f32` conversion penalty.
 

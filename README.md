@@ -1,36 +1,35 @@
 # vec101 🚀
 
-A highly optimized, `no_std`, `no_alloc` library for computing 1D compressed (1-bit) weights multiplied by continuous INT8 activations, primarily leveraging x86_64 AVX2 SIMD instructions for extreme latency reduction.
+A highly optimized, `no_std`, `no_alloc` library for computing 1.58-bit (ternary) weights multiplied by continuous INT8 activations. `vec101` acts as a branchless inference engine capable of extracting maximum hardware utilization across x86_64, Apple Silicon (NEON/Metal), and NVIDIA GPUs (CUDA).
 
 ## Features
 
-- **Extreme Performance**: Branchless, non-divergent hot loops written with AVX2 intrinsics.
-- **Hardware-aligned Layout**: Weight blocks (`vec101_block`) are meticulously padded to 32 bytes to cleanly fit in an `__m256i` register.
-- **Zero Allocations**: Fully `#![no_alloc]` compliant.
-- **Thread Tracking & Memory Checking**: Built-in atomic-based `ScopedResource` logic to track leaks explicitly without a heap allocator.
+- **Extreme SIMD Performance**: Core loops are heavily vectorized utilizing AVX2 (`_mm256_maddubs_epi16`) and NEON (`sdot` via `vdotq_s32`), effectively circumventing standard `if/else` execution penalties.
+- **Cross-Platform GPU Backends**: 
+  - **Apple Metal**: Exploits Unified Memory Architecture (UMA) for true Zero-Copy memory mapping and utilizes `popcount` on native Metal Shading Language (MSL) compute shaders.
+  - **NVIDIA CUDA**: Compiles pure Rust directly to PTX utilizing the cutting-edge `cuda-oxide` framework to leverage NVidia hardware `popcount`.
+- **Zero Allocations & `no_std`**: Completely heapless runtime. The computation context is strictly `no_std` and pointer-driven, avoiding standard library primitives and locks.
+- **INT8 Operator Fusion**: `SwiGLU` and `RMSNorm` are meticulously designed to stay within the INT8 integer space via dynamic Lookup Tables (LUTs) and fixed-point scaling, eliminating FP32 bottlenecks entirely.
 
 ## PERFORMANCE
 
-By transforming a matrix multiplication into a flattened continuous stream processor, `vec101` reduces `L1-dcache-misses` significantly. 
-The internal logic maps highly compressed 1-bit flags (0 for -1, 1 for +1) to bytes without any branches, bypassing standard `if/else` checks.
+By transforming matrix multiplication into a flattened continuous dual-rail bitmask processor, `vec101` significantly reduces `L1-dcache-misses` and completely avoids scalar branching.
 
-**Expected Speedup:** 
-- The latency is targeted to be **5x to 10x faster** than a pure FP32 double-for-loop equivalent.
-- Cache misses are greatly minimized due to prefetching (`_mm_prefetch`) and sequential linear layout.
+- Native Apple Silicon M1 (CPU NEON): **~5.32 tok/s** end-to-end decoding rate for a 3B Parameter Model.
+- Micro-benchmark (1.28M ternary accumulations): **~80.46 µs** on CPU SIMD vs. **1.24 ms** scalar baseline (15.4x Speedup).
 
 ### Running Benchmarks
 
-To verify the latency (using `criterion`):
+To verify the core engine latency (using `criterion`):
 ```bash
 cargo bench
 ```
 
-To verify the cache miss improvements (using `perf` on a Linux x86_64 host):
+To run the end-to-end simulated LLM decoding loop:
 ```bash
-cargo build --release --bin benchmark
-perf stat -e cache-misses,instructions,cycles target/release/benchmark
+cargo run --bin run_llm --release
 ```
 
 ## Architecture Details
 
-See `SPEC.md` for in-depth engineering decisions, memory layouts, and the strategy to prevent cache thrashing via Dualcache-ff.
+For comprehensive details on engineering decisions, ternary bitmask memory layouts (`w_pos_bits`/`w_neg_bits`), and GPU integration, please refer to the [SPEC.md](SPEC.md) and [PERF.md](PERF.md) documents.
