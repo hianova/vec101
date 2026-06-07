@@ -26,11 +26,29 @@ pub mod avx2;
 pub mod neon;
 pub mod scalar;
 
+#[cfg(feature = "gpu-metal")]
+pub mod metal_backend;
+
 // ==========================================
 // Main Dispatcher
 // ==========================================
 
 pub unsafe fn vec101_compute(ctx: &vec101_context) {
+    if ctx.batch_size == 0 || ctx.num_rows == 0 {
+        return;
+    }
+
+    #[cfg(feature = "gpu-metal")]
+    {
+        // Allocate zero-initialized memory for quantized x bits
+        let mut x_blocks = alloc::vec::Vec::with_capacity(ctx.blocks_per_row * ctx.batch_size);
+        unsafe { x_blocks.set_len(ctx.blocks_per_row * ctx.batch_size); }
+        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * ctx.blocks_per_row * 256) };
+        let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
+        metal_backend::metal_compute(ctx, &x_blocks, x_scale);
+        return;
+    }
+
     let num_threads = if ctx.num_threads == 0 { 1 } else { ctx.num_threads };
     let is_gemm = ctx.batch_size > 1;
 

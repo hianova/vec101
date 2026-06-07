@@ -427,3 +427,38 @@ pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight_i8: &[i8], v_weight_sca
         out_scales[t] = out_scale;
     }
 }
+
+use crate::types::vec101_block;
+
+/// Compresses an INT8 activation stream into 1.58-bit ternary masks for GPU bitwise operations.
+pub fn quantize_to_ternary(x_i8: &[i8], blocks: &mut [vec101_block]) -> f32 {
+    let mut sum_abs = 0i64;
+    for &v in x_i8 {
+        sum_abs += (v as i64).abs();
+    }
+    let scale = if x_i8.is_empty() { 0.0 } else { (sum_abs as f32) / (x_i8.len() as f32) };
+
+    for (i, chunk) in x_i8.chunks_exact(256).enumerate() {
+        let mut pos = [0u64; 4];
+        let mut neg = [0u64; 4];
+        for k in 0..4 {
+            let mut p_bits = 0u64;
+            let mut n_bits = 0u64;
+            let sub_chunk = &chunk[k * 64 .. (k + 1) * 64];
+            for (j, &v) in sub_chunk.iter().enumerate() {
+                if v > 0 {
+                    p_bits |= 1 << j;
+                } else if v < 0 {
+                    n_bits |= 1 << j;
+                }
+            }
+            pos[k] = p_bits;
+            neg[k] = n_bits;
+        }
+        blocks[i] = vec101_block {
+            w_pos_bits: pos,
+            w_neg_bits: neg,
+        };
+    }
+    scale
+}
