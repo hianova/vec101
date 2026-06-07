@@ -11,6 +11,7 @@ keywords = ["no_std", "simd", "avx2", "machine-learning", "1-bit"]
 default = ["std"]
 std = []
 gpu-metal = ["metal", "objc"]
+gpu-cuda = ["cuda-core", "cuda-device"]
 gpu-vulkan = []
 gpu-wgpu = []
 
@@ -19,6 +20,9 @@ dualcache-ff = { version = "0.4.1", optional = true, default-features = false }
 libm = "0.2.8"
 memmap2 = "0.9.10"
 safetensors = "0.7.0"
+
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = { version = "0.28", optional = true }
