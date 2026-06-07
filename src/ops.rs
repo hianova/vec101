@@ -135,10 +135,31 @@ pub fn attention(
 pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: f32, eps: f32, out_q: &mut [i8], out_scales: &mut [f32]) {
     let hidden_dim = weight_i8.len();
     for (t, (in_chunk, out_chunk)) in q.chunks(hidden_dim).zip(out_q.chunks_mut(hidden_dim)).enumerate() {
-        // Pass 1: Compute sum of squares in pure integer
+        // Pass 1: Compute sum of squares
         let mut sum_sq = 0i32;
-        for &v in in_chunk {
-            sum_sq += (v as i32) * (v as i32);
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            use core::arch::aarch64::*;
+            let mut sum_sq_acc = vdupq_n_s32(0);
+            let mut chunks = in_chunk.chunks_exact(16);
+            for chunk in chunks.by_ref() {
+                let x = vld1q_s8(chunk.as_ptr());
+                core::arch::asm!(
+                    "sdot {acc:v}.4s, {x:v}.16b, {x:v}.16b",
+                    acc = inout(vreg) sum_sq_acc,
+                    x = in(vreg) x,
+                );
+            }
+            sum_sq += vaddvq_s32(sum_sq_acc);
+            for &v in chunks.remainder() {
+                sum_sq += (v as i32) * (v as i32);
+            }
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            for &v in in_chunk {
+                sum_sq += (v as i32) * (v as i32);
+            }
         }
         
         // Float scalar ops (O(1) per token, entirely negligible)
@@ -148,10 +169,32 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: f32, eps: f32, out
 
         // Pass 2: Find max_abs of (x_i8 * weight_i8)
         let mut max_abs_int = 0i32;
-        for i in 0..hidden_dim {
-            let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
-            let abs = prod.abs();
-            if abs > max_abs_int { max_abs_int = abs; }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            use core::arch::aarch64::*;
+            let mut max_vec = vdupq_n_s16(0);
+            let mut x_chunks = in_chunk.chunks_exact(16);
+            let mut w_chunks = weight_i8.chunks_exact(16);
+            for (x_ch, w_ch) in x_chunks.by_ref().zip(w_chunks.by_ref()) {
+                let x = vld1q_s8(x_ch.as_ptr());
+                let w = vld1q_s8(w_ch.as_ptr());
+                let p_lo = vmull_s8(vget_low_s8(x), vget_low_s8(w));
+                let p_hi = vmull_s8(vget_high_s8(x), vget_high_s8(w));
+                max_vec = vmaxq_s16(max_vec, vmaxq_s16(vabsq_s16(p_lo), vabsq_s16(p_hi)));
+            }
+            max_abs_int = vmaxvq_s16(max_vec) as i32;
+            for (&x, &w) in x_chunks.remainder().iter().zip(w_chunks.remainder()) {
+                let abs = ((x as i32) * (w as i32)).abs();
+                if abs > max_abs_int { max_abs_int = abs; }
+            }
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            for i in 0..hidden_dim {
+                let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
+                let abs = prod.abs();
+                if abs > max_abs_int { max_abs_int = abs; }
+            }
         }
 
         let max_out_float = (max_abs_int as f32) * combined_scale;
@@ -162,12 +205,59 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: f32, eps: f32, out
         let mult_int = libm::roundf(multiplier_f32 * ((1 << q_shift) as f32)) as i32;
 
         // Pass 3: Scale to output using fixed-point integer math
-        for i in 0..hidden_dim {
-            let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
-            let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
-            if quantized > 127 { quantized = 127; }
-            if quantized < -128 { quantized = -128; }
-            out_chunk[i] = quantized as i8;
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            use core::arch::aarch64::*;
+            let mut x_chunks = in_chunk.chunks_exact(16);
+            let mut w_chunks = weight_i8.chunks_exact(16);
+            let mut out_chunks = out_chunk.chunks_exact_mut(16);
+            for ((x_ch, w_ch), out_ch) in x_chunks.by_ref().zip(w_chunks.by_ref()).zip(out_chunks.by_ref()) {
+                let x = vld1q_s8(x_ch.as_ptr());
+                let w = vld1q_s8(w_ch.as_ptr());
+                
+                let p_lo = vmull_s8(vget_low_s8(x), vget_low_s8(w));
+                let p_hi = vmull_s8(vget_high_s8(x), vget_high_s8(w));
+                
+                let p_ll = vmovl_s16(vget_low_s16(p_lo));
+                let p_lh = vmovl_s16(vget_high_s16(p_lo));
+                let p_hl = vmovl_s16(vget_low_s16(p_hi));
+                let p_hh = vmovl_s16(vget_high_s16(p_hi));
+                
+                let r_ll = vmulq_n_s32(p_ll, mult_int);
+                let r_lh = vmulq_n_s32(p_lh, mult_int);
+                let r_hl = vmulq_n_s32(p_hl, mult_int);
+                let r_hh = vmulq_n_s32(p_hh, mult_int);
+                
+                let s_ll = vshrq_n_s32::<15>(r_ll);
+                let s_lh = vshrq_n_s32::<15>(r_lh);
+                let s_hl = vshrq_n_s32::<15>(r_hl);
+                let s_hh = vshrq_n_s32::<15>(r_hh);
+                
+                let n_l = vcombine_s16(vqmovn_s32(s_ll), vqmovn_s32(s_lh));
+                let n_h = vcombine_s16(vqmovn_s32(s_hl), vqmovn_s32(s_hh));
+                
+                let final_q = vcombine_s8(vqmovn_s16(n_l), vqmovn_s16(n_h));
+                vst1q_s8(out_ch.as_mut_ptr(), final_q);
+            }
+            
+            // remainder (if hidden_dim % 16 != 0)
+            for ((&x, &w), out) in x_chunks.remainder().iter().zip(w_chunks.remainder()).zip(out_chunks.into_remainder()) {
+                let prod = (x as i32) * (w as i32);
+                let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
+                if quantized > 127 { quantized = 127; }
+                if quantized < -128 { quantized = -128; }
+                *out = quantized as i8;
+            }
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            for i in 0..hidden_dim {
+                let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
+                let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
+                if quantized > 127 { quantized = 127; }
+                if quantized < -128 { quantized = -128; }
+                out_chunk[i] = quantized as i8;
+            }
         }
 
         out_scales[t] = out_scale;
@@ -207,13 +297,51 @@ pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight_i8: &[i8], v_weight_sca
         
         // 2. Find max absolute product in the chunk
         let mut max_abs_int = 0i32;
-        for i in 0..hidden_dim {
-            let x_val = in_chunk[i];
-            let l_val = lut_i8[(x_val as i32 + 128) as usize] as i32;
-            let v_val = v_weight_i8[i] as i32;
-            let prod = l_val * v_val;
-            let abs = prod.abs();
-            if abs > max_abs_int { max_abs_int = abs; }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            use core::arch::aarch64::*;
+            let t0 = vld1q_u8_x4(lut_i8[0..64].as_ptr() as *const u8);
+            let t1 = vld1q_u8_x4(lut_i8[64..128].as_ptr() as *const u8);
+            let t2 = vld1q_u8_x4(lut_i8[128..192].as_ptr() as *const u8);
+            let t3 = vld1q_u8_x4(lut_i8[192..256].as_ptr() as *const u8);
+            
+            let mut max_vec = vdupq_n_s16(0);
+            let mut x_chunks = in_chunk.chunks_exact(16);
+            let mut v_chunks = v_weight_i8.chunks_exact(16);
+            for (x_ch, v_ch) in x_chunks.by_ref().zip(v_chunks.by_ref()) {
+                let x = vld1q_s8(x_ch.as_ptr());
+                let x_u8 = vaddq_u8(vreinterpretq_u8_s8(x), vdupq_n_u8(128));
+                let r0 = vqtbl4q_u8(t0, x_u8);
+                let r1 = vqtbl4q_u8(t1, vsubq_u8(x_u8, vdupq_n_u8(64)));
+                let r2 = vqtbl4q_u8(t2, vsubq_u8(x_u8, vdupq_n_u8(128)));
+                let r3 = vqtbl4q_u8(t3, vsubq_u8(x_u8, vdupq_n_u8(192)));
+                
+                let res = vorrq_u8(vorrq_u8(r0, r1), vorrq_u8(r2, r3));
+                let l_val = vreinterpretq_s8_u8(res);
+                let v = vld1q_s8(v_ch.as_ptr());
+                
+                let p_lo = vmull_s8(vget_low_s8(l_val), vget_low_s8(v));
+                let p_hi = vmull_s8(vget_high_s8(l_val), vget_high_s8(v));
+                max_vec = vmaxq_s16(max_vec, vmaxq_s16(vabsq_s16(p_lo), vabsq_s16(p_hi)));
+            }
+            max_abs_int = vmaxvq_s16(max_vec) as i32;
+            for (&x, &v) in x_chunks.remainder().iter().zip(v_chunks.remainder()) {
+                let l_val = lut_i8[(x as i32 + 128) as usize] as i32;
+                let prod = l_val * (v as i32);
+                let abs = prod.abs();
+                if abs > max_abs_int { max_abs_int = abs; }
+            }
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            for i in 0..hidden_dim {
+                let x_val = in_chunk[i];
+                let l_val = lut_i8[(x_val as i32 + 128) as usize] as i32;
+                let v_val = v_weight_i8[i] as i32;
+                let prod = l_val * v_val;
+                let abs = prod.abs();
+                if abs > max_abs_int { max_abs_int = abs; }
+            }
         }
         
         let max_out_float = (max_abs_int as f32) * combined_scale;
@@ -224,16 +352,76 @@ pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight_i8: &[i8], v_weight_sca
         let mult_int = libm::roundf(multiplier_f32 * ((1 << q_shift) as f32)) as i32;
         
         // 3. Process the chunk entirely in integer
-        for i in 0..hidden_dim {
-            let x_val = in_chunk[i];
-            let l_val = lut_i8[(x_val as i32 + 128) as usize] as i32;
-            let v_val = v_weight_i8[i] as i32;
-            let prod = l_val * v_val;
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            use core::arch::aarch64::*;
+            let t0 = vld1q_u8_x4(lut_i8[0..64].as_ptr() as *const u8);
+            let t1 = vld1q_u8_x4(lut_i8[64..128].as_ptr() as *const u8);
+            let t2 = vld1q_u8_x4(lut_i8[128..192].as_ptr() as *const u8);
+            let t3 = vld1q_u8_x4(lut_i8[192..256].as_ptr() as *const u8);
+
+            let mut x_chunks = in_chunk.chunks_exact(16);
+            let mut v_chunks = v_weight_i8.chunks_exact(16);
+            let mut out_chunks = out_chunk.chunks_exact_mut(16);
+            for ((x_ch, v_ch), out_ch) in x_chunks.by_ref().zip(v_chunks.by_ref()).zip(out_chunks.by_ref()) {
+                let x = vld1q_s8(x_ch.as_ptr());
+                let x_u8 = vaddq_u8(vreinterpretq_u8_s8(x), vdupq_n_u8(128));
+                let r0 = vqtbl4q_u8(t0, x_u8);
+                let r1 = vqtbl4q_u8(t1, vsubq_u8(x_u8, vdupq_n_u8(64)));
+                let r2 = vqtbl4q_u8(t2, vsubq_u8(x_u8, vdupq_n_u8(128)));
+                let r3 = vqtbl4q_u8(t3, vsubq_u8(x_u8, vdupq_n_u8(192)));
+                
+                let res = vorrq_u8(vorrq_u8(r0, r1), vorrq_u8(r2, r3));
+                let l_val = vreinterpretq_s8_u8(res);
+                let v = vld1q_s8(v_ch.as_ptr());
+                
+                let p_lo = vmull_s8(vget_low_s8(l_val), vget_low_s8(v));
+                let p_hi = vmull_s8(vget_high_s8(l_val), vget_high_s8(v));
+                
+                let p_ll = vmovl_s16(vget_low_s16(p_lo));
+                let p_lh = vmovl_s16(vget_high_s16(p_lo));
+                let p_hl = vmovl_s16(vget_low_s16(p_hi));
+                let p_hh = vmovl_s16(vget_high_s16(p_hi));
+                
+                let r_ll = vmulq_n_s32(p_ll, mult_int);
+                let r_lh = vmulq_n_s32(p_lh, mult_int);
+                let r_hl = vmulq_n_s32(p_hl, mult_int);
+                let r_hh = vmulq_n_s32(p_hh, mult_int);
+                
+                let s_ll = vshrq_n_s32::<15>(r_ll);
+                let s_lh = vshrq_n_s32::<15>(r_lh);
+                let s_hl = vshrq_n_s32::<15>(r_hl);
+                let s_hh = vshrq_n_s32::<15>(r_hh);
+                
+                let n_l = vcombine_s16(vqmovn_s32(s_ll), vqmovn_s32(s_lh));
+                let n_h = vcombine_s16(vqmovn_s32(s_hl), vqmovn_s32(s_hh));
+                
+                let final_q = vcombine_s8(vqmovn_s16(n_l), vqmovn_s16(n_h));
+                vst1q_s8(out_ch.as_mut_ptr(), final_q);
+            }
             
-            let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
-            if quantized > 127 { quantized = 127; }
-            if quantized < -128 { quantized = -128; }
-            out_chunk[i] = quantized as i8;
+            for ((&x, &v), out) in x_chunks.remainder().iter().zip(v_chunks.remainder()).zip(out_chunks.into_remainder()) {
+                let l_val = lut_i8[(x as i32 + 128) as usize] as i32;
+                let prod = l_val * (v as i32);
+                let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
+                if quantized > 127 { quantized = 127; }
+                if quantized < -128 { quantized = -128; }
+                *out = quantized as i8;
+            }
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            for i in 0..hidden_dim {
+                let x_val = in_chunk[i];
+                let l_val = lut_i8[(x_val as i32 + 128) as usize] as i32;
+                let v_val = v_weight_i8[i] as i32;
+                let prod = l_val * v_val;
+                
+                let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
+                if quantized > 127 { quantized = 127; }
+                if quantized < -128 { quantized = -128; }
+                out_chunk[i] = quantized as i8;
+            }
         }
         
         out_scales[t] = out_scale;

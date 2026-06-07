@@ -5,25 +5,21 @@ use core::arch::aarch64::*;
 
 #[cfg(target_arch = "aarch64")]
 #[inline(always)]
-unsafe fn expand_bits_to_mask_neon(w_16: u16) -> int8x16_t {
-    let mut mask_arr = [0i8; 16];
-    for b in 0..16 {
-        if (w_16 & (1 << b)) != 0 {
-            mask_arr[b] = -1; // 0xFF
-        } else {
-            mask_arr[b] = 0x00;
-        }
-    }
-    vld1q_s8(mask_arr.as_ptr())
+unsafe fn expand_bits_to_mask_neon(w_16: u16, bit_mask: uint8x16_t) -> int8x16_t {
+    let lo = vdup_n_u8(w_16 as u8);
+    let hi = vdup_n_u8((w_16 >> 8) as u8);
+    let combined = vcombine_u8(lo, hi);
+    // vtstq_u8 returns 0xFF where (combined & bit_mask) != 0
+    vreinterpretq_s8_u8(vtstq_u8(combined, bit_mask))
 }
 
 #[cfg(target_arch = "aarch64")]
 pub unsafe fn process_row_neon_gemv(row: usize, ctx: &vec101_context) {
     let scale = *ctx.s_stream.add(row);
-    let mut block_sum_pos = 0i32;
-    let mut block_sum_neg = 0i32;
-    let mut acc_pos = vdupq_n_s32(0);
-    let mut acc_neg = vdupq_n_s32(0);
+    let mut acc = vdupq_n_s32(0);
+    
+    let bit_mask_arr: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
+    let bit_mask = vld1q_u8(bit_mask_arr.as_ptr());
 
     for col in 0..ctx.blocks_per_row {
         let block_idx = row * ctx.blocks_per_row + col;
@@ -35,223 +31,104 @@ pub unsafe fn process_row_neon_gemv(row: usize, ctx: &vec101_context) {
             let w_pos_32 = (w_block.w_pos_bits[u64_idx] >> shift_amt) as u32;
             let w_neg_32 = (w_block.w_neg_bits[u64_idx] >> shift_amt) as u32;
 
-            let mask_pos_lo = expand_bits_to_mask_neon((w_pos_32 & 0xFFFF) as u16);
-            let mask_pos_hi = expand_bits_to_mask_neon((w_pos_32 >> 16) as u16);
-            let mask_neg_lo = expand_bits_to_mask_neon((w_neg_32 & 0xFFFF) as u16);
-            let mask_neg_hi = expand_bits_to_mask_neon((w_neg_32 >> 16) as u16);
+            let mask_pos_lo = expand_bits_to_mask_neon((w_pos_32 & 0xFFFF) as u16, bit_mask);
+            let mask_pos_hi = expand_bits_to_mask_neon((w_pos_32 >> 16) as u16, bit_mask);
+            let mask_neg_lo = expand_bits_to_mask_neon((w_neg_32 & 0xFFFF) as u16, bit_mask);
+            let mask_neg_hi = expand_bits_to_mask_neon((w_neg_32 >> 16) as u16, bit_mask);
+
+            // Construct actual i8 weights: w = pos_mask - neg_mask
+            // If pos_mask is -1 (0xFF), neg_mask is 0, w = -1 - 0 = -1 (Wait!)
+            // We want w=1 when pos. So we need w = neg_mask - pos_mask.
+            // If pos=1 (pos_mask=-1, neg_mask=0), w = 0 - (-1) = 1.
+            // If neg=1 (pos_mask=0, neg_mask=-1), w = -1 - 0 = -1.
+            let w_vec_lo = vsubq_s8(mask_neg_lo, mask_pos_lo);
+            let w_vec_hi = vsubq_s8(mask_neg_hi, mask_pos_hi);
 
             let x_ptr = ctx.x_stream.add(col * 256 + sub * 32);
-
             let x_val_lo = vld1q_s8(x_ptr);
             let x_val_hi = vld1q_s8(x_ptr.add(16));
 
-            let x_pos_lo = vandq_s8(x_val_lo, mask_pos_lo);
-            let x_pos_hi = vandq_s8(x_val_hi, mask_pos_hi);
-            let x_neg_lo = vandq_s8(x_val_lo, mask_neg_lo);
-            let x_neg_hi = vandq_s8(x_val_hi, mask_neg_hi);
-
-            let mut tmp_pos = vpaddlq_s16(vpaddlq_s8(x_pos_lo));
-            acc_pos = vaddq_s32(acc_pos, tmp_pos);
-            tmp_pos = vpaddlq_s16(vpaddlq_s8(x_pos_hi));
-            acc_pos = vaddq_s32(acc_pos, tmp_pos);
+            core::arch::asm!(
+                "sdot {acc:v}.4s, {x:v}.16b, {w:v}.16b",
+                acc = inout(vreg) acc,
+                x = in(vreg) x_val_lo,
+                w = in(vreg) w_vec_lo,
+            );
             
-            let mut tmp_neg = vpaddlq_s16(vpaddlq_s8(x_neg_lo));
-            acc_neg = vaddq_s32(acc_neg, tmp_neg);
-            tmp_neg = vpaddlq_s16(vpaddlq_s8(x_neg_hi));
-            acc_neg = vaddq_s32(acc_neg, tmp_neg);
+            core::arch::asm!(
+                "sdot {acc:v}.4s, {x:v}.16b, {w:v}.16b",
+                acc = inout(vreg) acc,
+                x = in(vreg) x_val_hi,
+                w = in(vreg) w_vec_hi,
+            );
         }
     }
 
-    let sum_pos = vaddvq_s32(acc_pos);
-    let sum_neg = vaddvq_s32(acc_neg);
-    
+    let sum = vaddvq_s32(acc);
     let out_ptr = ctx.out_buffer.add(row);
-    *out_ptr += ((sum_pos - sum_neg) as f32) * scale;
+    *out_ptr += (sum as f32) * scale;
 }
 #[cfg(target_arch = "aarch64")]
-pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, x_t: &[i8], padded_batch: usize, row_sums: &mut [i32]) {
+pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
     let scale = *ctx.s_stream.add(row);
+    let in_features = ctx.blocks_per_row * 256;
     
-    let mut pos_indices = [0u16; 4096];
-    let mut neg_indices = [0u16; 4096];
-    let mut pos_cnt = 0;
-    let mut neg_cnt = 0;
+    // Decode the 1.58-bit weights for this row into an i8 buffer ONCE
+    // 4096 elements = 4KB, fits perfectly in L1 cache.
+    let mut w_i8: alloc::vec::Vec<i8> = alloc::vec::Vec::with_capacity(in_features);
+    w_i8.set_len(in_features);
+    
+    let bit_mask_arr: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
+    let bit_mask = vld1q_u8(bit_mask_arr.as_ptr());
 
     for col in 0..ctx.blocks_per_row {
         let block_idx = row * ctx.blocks_per_row + col;
         let w_block = &(*ctx.w_stream.add(block_idx));
-        for sub in 0..4 {
-            let mut pos_bits = w_block.w_pos_bits[sub];
-            while pos_bits != 0 {
-                let tz = pos_bits.trailing_zeros();
-                pos_bits &= pos_bits - 1;
-                pos_indices[pos_cnt] = (col * 256 + sub * 64 + tz as usize) as u16;
-                pos_cnt += 1;
-            }
-            let mut neg_bits = w_block.w_neg_bits[sub];
-            while neg_bits != 0 {
-                let tz = neg_bits.trailing_zeros();
-                neg_bits &= neg_bits - 1;
-                neg_indices[neg_cnt] = (col * 256 + sub * 64 + tz as usize) as u16;
-                neg_cnt += 1;
-            }
+
+        for sub in 0..8 {
+            let u64_idx = sub / 2;
+            let shift_amt = (sub % 2) * 32;
+            let w_pos_32 = (w_block.w_pos_bits[u64_idx] >> shift_amt) as u32;
+            let w_neg_32 = (w_block.w_neg_bits[u64_idx] >> shift_amt) as u32;
+
+            let mask_pos_lo = expand_bits_to_mask_neon((w_pos_32 & 0xFFFF) as u16, bit_mask);
+            let mask_pos_hi = expand_bits_to_mask_neon((w_pos_32 >> 16) as u16, bit_mask);
+            let mask_neg_lo = expand_bits_to_mask_neon((w_neg_32 & 0xFFFF) as u16, bit_mask);
+            let mask_neg_hi = expand_bits_to_mask_neon((w_neg_32 >> 16) as u16, bit_mask);
+
+            let w_vec_lo = vsubq_s8(mask_neg_lo, mask_pos_lo);
+            let w_vec_hi = vsubq_s8(mask_neg_hi, mask_pos_hi);
+            
+            let feature_offset = col * 256 + sub * 32;
+            vst1q_s8(w_i8.as_mut_ptr().add(feature_offset), w_vec_lo);
+            vst1q_s8(w_i8.as_mut_ptr().add(feature_offset + 16), w_vec_hi);
         }
     }
 
-    let mut b_start = 0;
-    while b_start + 64 <= ctx.batch_size {
-        let mut s0 = vdupq_n_s32(0);
-        let mut s1 = vdupq_n_s32(0);
-        let mut s2 = vdupq_n_s32(0);
-        let mut s3 = vdupq_n_s32(0);
-        let mut s4 = vdupq_n_s32(0);
-        let mut s5 = vdupq_n_s32(0);
-        let mut s6 = vdupq_n_s32(0);
-        let mut s7 = vdupq_n_s32(0);
-        let mut s8 = vdupq_n_s32(0);
-        let mut s9 = vdupq_n_s32(0);
-        let mut s10 = vdupq_n_s32(0);
-        let mut s11 = vdupq_n_s32(0);
-        let mut s12 = vdupq_n_s32(0);
-        let mut s13 = vdupq_n_s32(0);
-        let mut s14 = vdupq_n_s32(0);
-        let mut s15 = vdupq_n_s32(0);
+    // Now blast SDOT over all batches
+    for b in 0..ctx.batch_size {
+        let mut acc = vdupq_n_s32(0);
+        let x_batch_ptr = ctx.x_stream.add(b * in_features);
+        let w_ptr = w_i8.as_ptr();
 
-        for chunk in pos_indices[..pos_cnt].chunks(256) {
-            let mut a0 = vdupq_n_s16(0);
-            let mut a1 = vdupq_n_s16(0);
-            let mut a2 = vdupq_n_s16(0);
-            let mut a3 = vdupq_n_s16(0);
-            let mut a4 = vdupq_n_s16(0);
-            let mut a5 = vdupq_n_s16(0);
-            let mut a6 = vdupq_n_s16(0);
-            let mut a7 = vdupq_n_s16(0);
+        for chunk in 0..(in_features / 16) {
+            let offset = chunk * 16;
+            let x_val = vld1q_s8(x_batch_ptr.add(offset));
+            let w_val = vld1q_s8(w_ptr.add(offset));
 
-            for &f in chunk {
-                let x_ptr = x_t.as_ptr().add((f as usize) * padded_batch + b_start);
-
-                let xa = vld1q_s8(x_ptr);
-                a0 = vaddw_s8(a0, vget_low_s8(xa));
-                a1 = vaddw_s8(a1, vget_high_s8(xa));
-
-                let xb = vld1q_s8(x_ptr.add(16));
-                a2 = vaddw_s8(a2, vget_low_s8(xb));
-                a3 = vaddw_s8(a3, vget_high_s8(xb));
-
-                let xc = vld1q_s8(x_ptr.add(32));
-                a4 = vaddw_s8(a4, vget_low_s8(xc));
-                a5 = vaddw_s8(a5, vget_high_s8(xc));
-
-                let xd = vld1q_s8(x_ptr.add(48));
-                a6 = vaddw_s8(a6, vget_low_s8(xd));
-                a7 = vaddw_s8(a7, vget_high_s8(xd));
-            }
-
-            s0 = vaddw_s16(s0, vget_low_s16(a0));
-            s1 = vaddw_s16(s1, vget_high_s16(a0));
-            s2 = vaddw_s16(s2, vget_low_s16(a1));
-            s3 = vaddw_s16(s3, vget_high_s16(a1));
-
-            s4 = vaddw_s16(s4, vget_low_s16(a2));
-            s5 = vaddw_s16(s5, vget_high_s16(a2));
-            s6 = vaddw_s16(s6, vget_low_s16(a3));
-            s7 = vaddw_s16(s7, vget_high_s16(a3));
-
-            s8 = vaddw_s16(s8, vget_low_s16(a4));
-            s9 = vaddw_s16(s9, vget_high_s16(a4));
-            s10 = vaddw_s16(s10, vget_low_s16(a5));
-            s11 = vaddw_s16(s11, vget_high_s16(a5));
-
-            s12 = vaddw_s16(s12, vget_low_s16(a6));
-            s13 = vaddw_s16(s13, vget_high_s16(a6));
-            s14 = vaddw_s16(s14, vget_low_s16(a7));
-            s15 = vaddw_s16(s15, vget_high_s16(a7));
+            core::arch::asm!(
+                "sdot {acc:v}.4s, {x:v}.16b, {w:v}.16b",
+                acc = inout(vreg) acc,
+                x = in(vreg) x_val,
+                w = in(vreg) w_val,
+            );
         }
 
-        for chunk in neg_indices[..neg_cnt].chunks(256) {
-            let mut a0 = vdupq_n_s16(0);
-            let mut a1 = vdupq_n_s16(0);
-            let mut a2 = vdupq_n_s16(0);
-            let mut a3 = vdupq_n_s16(0);
-            let mut a4 = vdupq_n_s16(0);
-            let mut a5 = vdupq_n_s16(0);
-            let mut a6 = vdupq_n_s16(0);
-            let mut a7 = vdupq_n_s16(0);
-
-            for &f in chunk {
-                let x_ptr = x_t.as_ptr().add((f as usize) * padded_batch + b_start);
-
-                let xa = vld1q_s8(x_ptr);
-                a0 = vaddw_s8(a0, vget_low_s8(xa));
-                a1 = vaddw_s8(a1, vget_high_s8(xa));
-
-                let xb = vld1q_s8(x_ptr.add(16));
-                a2 = vaddw_s8(a2, vget_low_s8(xb));
-                a3 = vaddw_s8(a3, vget_high_s8(xb));
-
-                let xc = vld1q_s8(x_ptr.add(32));
-                a4 = vaddw_s8(a4, vget_low_s8(xc));
-                a5 = vaddw_s8(a5, vget_high_s8(xc));
-
-                let xd = vld1q_s8(x_ptr.add(48));
-                a6 = vaddw_s8(a6, vget_low_s8(xd));
-                a7 = vaddw_s8(a7, vget_high_s8(xd));
-            }
-
-            s0 = vsubw_s16(s0, vget_low_s16(a0));
-            s1 = vsubw_s16(s1, vget_high_s16(a0));
-            s2 = vsubw_s16(s2, vget_low_s16(a1));
-            s3 = vsubw_s16(s3, vget_high_s16(a1));
-
-            s4 = vsubw_s16(s4, vget_low_s16(a2));
-            s5 = vsubw_s16(s5, vget_high_s16(a2));
-            s6 = vsubw_s16(s6, vget_low_s16(a3));
-            s7 = vsubw_s16(s7, vget_high_s16(a3));
-
-            s8 = vsubw_s16(s8, vget_low_s16(a4));
-            s9 = vsubw_s16(s9, vget_high_s16(a4));
-            s10 = vsubw_s16(s10, vget_low_s16(a5));
-            s11 = vsubw_s16(s11, vget_high_s16(a5));
-
-            s12 = vsubw_s16(s12, vget_low_s16(a6));
-            s13 = vsubw_s16(s13, vget_high_s16(a6));
-            s14 = vsubw_s16(s14, vget_low_s16(a7));
-            s15 = vsubw_s16(s15, vget_high_s16(a7));
-        }
-
-        let sum_ptr = row_sums.as_mut_ptr().add(b_start);
-        vst1q_s32(sum_ptr, s0);
-        vst1q_s32(sum_ptr.add(4), s1);
-        vst1q_s32(sum_ptr.add(8), s2);
-        vst1q_s32(sum_ptr.add(12), s3);
-        vst1q_s32(sum_ptr.add(16), s4);
-        vst1q_s32(sum_ptr.add(20), s5);
-        vst1q_s32(sum_ptr.add(24), s6);
-        vst1q_s32(sum_ptr.add(28), s7);
-        vst1q_s32(sum_ptr.add(32), s8);
-        vst1q_s32(sum_ptr.add(36), s9);
-        vst1q_s32(sum_ptr.add(40), s10);
-        vst1q_s32(sum_ptr.add(44), s11);
-        vst1q_s32(sum_ptr.add(48), s12);
-        vst1q_s32(sum_ptr.add(52), s13);
-        vst1q_s32(sum_ptr.add(56), s14);
-        vst1q_s32(sum_ptr.add(60), s15);
-
-        b_start += 64;
+        let sum = vaddvq_s32(acc);
+        row_sums[b] = sum;
     }
 
-    while b_start < ctx.batch_size {
-        let mut sum = 0;
-        for i in 0..pos_cnt {
-            sum += x_t[pos_indices[i] as usize * padded_batch + b_start] as i32;
-        }
-        for i in 0..neg_cnt {
-            sum -= x_t[neg_indices[i] as usize * padded_batch + b_start] as i32;
-        }
-        row_sums[b_start] = sum;
-        b_start += 1;
-    }
-
+    // Write out the scaled results
     for b in 0..ctx.batch_size {
         *ctx.out_buffer.add(b * ctx.num_rows + row) += (row_sums[b] as f32) * scale;
     }

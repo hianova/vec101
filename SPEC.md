@@ -32,9 +32,9 @@ The core compute loop (`vec101_compute`) utilizes branchless SIMD programming ta
 - Horizontally sums 32-byte chunks instantly using `madd` fused instructions.
 
 ### NEON (ARM aarch64 - M1/M2/M3)
-- Uses `vld1q_s8` to load 16-byte chunks.
-- Isolates positive and negative bits using `vandq_s8`.
-- Leverages `vpaddlq_s8` and `vpaddlq_s16` (Pairwise Accumulation) to hierarchically sum 16 INT8 values into INT32 accumulators in incredibly few cycles.
+- **Weight Pre-Decoding**: 1.58-bit ternary weights are decoded into continuous `i8` arrays ONCE per row to bypass intensive runtime bit-fiddling in the hot loops.
+- **Signed Dot Product (`sdot`)**: Uses the highly advanced `sdot` instruction (`vdotq_s32`) within inline `asm!` to fuse four `i8` multiplications and `i32` accumulations instantly, achieving peak M1/M2/M3 vectorization throughput.
+- **Vectorized Operator Fusion**: `SwiGLU` and `RMSNorm` leverages `vqtbl4q_u8` (Dynamic Vectorized LUT Lookups) and saturating narrow conversions (`vqmovn_s32`) to process INT8 scaling, clamping, and quantization fully within NEON vector registers.
 
 ## Pure INT8 Operator Fusion
 All linear layer outputs are intercepted before generating `Vec<f32>` arrays. `RMSNorm` and `SwiGLU` have been meticulously designed to take `&[i8]` inputs and directly output `&[i8]` values + a dynamic scale, completely obliterating the `f32` conversion penalty.
