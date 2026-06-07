@@ -129,68 +129,113 @@ pub fn attention(
 }
 
 /// Fused INT8 RMSNorm.
-/// Computes RMSNorm directly from `i8` array to `i8` array, bypassing `f32` allocations.
+/// Computes RMSNorm directly from `i8` array to `i8` array using fixed-point math, bypassing `f32` allocations.
+/// Requires pre-quantized `weight_i8` and its `weight_scale`.
 /// Returns the new dynamic scale factor `s'` per token.
-pub fn rmsnorm_int8(q: &[i8], weight: &[f32], eps: f32, out_q: &mut [i8], out_scales: &mut [f32]) {
-    let hidden_dim = weight.len();
+pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: f32, eps: f32, out_q: &mut [i8], out_scales: &mut [f32]) {
+    let hidden_dim = weight_i8.len();
     for (t, (in_chunk, out_chunk)) in q.chunks(hidden_dim).zip(out_q.chunks_mut(hidden_dim)).enumerate() {
+        // Pass 1: Compute sum of squares in pure integer
         let mut sum_sq = 0i32;
         for &v in in_chunk {
             sum_sq += (v as i32) * (v as i32);
         }
         
+        // Float scalar ops (O(1) per token, entirely negligible)
         let mean_sq = (sum_sq as f32) / (hidden_dim as f32);
         let inv_rms = 1.0 / libm::sqrtf(mean_sq + eps);
+        let combined_scale = inv_rms * weight_scale;
 
-        let mut max_abs = 0.0f32;
+        // Pass 2: Find max_abs of (x_i8 * weight_i8)
+        let mut max_abs_int = 0i32;
         for i in 0..hidden_dim {
-            let out_float = (in_chunk[i] as f32) * inv_rms * weight[i];
-            let abs = libm::fabsf(out_float);
-            if abs > max_abs { max_abs = abs; }
+            let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
+            let abs = prod.abs();
+            if abs > max_abs_int { max_abs_int = abs; }
         }
 
-        let scale = if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 };
-        let inv_scale = 1.0 / scale;
+        let max_out_float = (max_abs_int as f32) * combined_scale;
+        let out_scale = if max_out_float == 0.0 { 1.0 } else { max_out_float / 127.0 };
+        
+        let multiplier_f32 = if out_scale == 0.0 { 0.0 } else { combined_scale / out_scale };
+        let q_shift = 15;
+        let mult_int = libm::roundf(multiplier_f32 * ((1 << q_shift) as f32)) as i32;
 
+        // Pass 3: Scale to output using fixed-point integer math
         for i in 0..hidden_dim {
-            let out_float = (in_chunk[i] as f32) * inv_rms * weight[i];
-            let mut quantized = libm::roundf(out_float * inv_scale) as i32;
+            let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
+            let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
             if quantized > 127 { quantized = 127; }
             if quantized < -128 { quantized = -128; }
             out_chunk[i] = quantized as i8;
         }
 
-        out_scales[t] = scale;
+        out_scales[t] = out_scale;
     }
 }
 
 /// Fused INT8 SwiGLU.
-/// Computes SiLU and multiplies by V directly into an INT8 output buffer.
-pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight: &[f32], out_q: &mut [i8], out_scales: &mut [f32]) {
-    let hidden_dim = v_weight.len();
+/// Computes SiLU and multiplies by V directly into an INT8 output buffer using a Dynamic LUT.
+pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight_i8: &[i8], v_weight_scale: f32, out_q: &mut [i8], out_scales: &mut [f32]) {
+    let hidden_dim = v_weight_i8.len();
     for (t, (in_chunk, out_chunk)) in q.chunks(hidden_dim).zip(out_q.chunks_mut(hidden_dim)).enumerate() {
         let s = in_scales[t];
-        let mut max_abs = 0.0f32;
-
-        for i in 0..hidden_dim {
-            let x_float = (in_chunk[i] as f32) * s;
-            let out_float = silu(x_float) * v_weight[i];
-            let abs = libm::fabsf(out_float);
-            if abs > max_abs { max_abs = abs; }
+        
+        // 1. Build Dynamic LUT for SiLU
+        let mut lut_f32 = [0.0f32; 256];
+        let mut max_lut_abs = 0.0f32;
+        for x_int in -128..=127i32 {
+            let x_float = (x_int as f32) * s;
+            let val = silu(x_float);
+            lut_f32[(x_int + 128) as usize] = val;
+            let abs = libm::fabsf(val);
+            if abs > max_lut_abs { max_lut_abs = abs; }
         }
-
-        let scale = if max_abs == 0.0 { 1.0 } else { max_abs / 127.0 };
-        let inv_scale = 1.0 / scale;
-
+        
+        let lut_scale = if max_lut_abs == 0.0 { 1.0 } else { max_lut_abs / 127.0 };
+        let inv_lut_scale = if lut_scale == 0.0 { 0.0 } else { 1.0 / lut_scale };
+        
+        let mut lut_i8 = [0i8; 256];
+        for i in 0..256 {
+            let mut q_val = libm::roundf(lut_f32[i] * inv_lut_scale) as i32;
+            if q_val > 127 { q_val = 127; }
+            if q_val < -128 { q_val = -128; }
+            lut_i8[i] = q_val as i8;
+        }
+        
+        let combined_scale = lut_scale * v_weight_scale;
+        
+        // 2. Find max absolute product in the chunk
+        let mut max_abs_int = 0i32;
         for i in 0..hidden_dim {
-            let x_float = (in_chunk[i] as f32) * s;
-            let out_float = silu(x_float) * v_weight[i];
-            let mut quantized = libm::roundf(out_float * inv_scale) as i32;
+            let x_val = in_chunk[i];
+            let l_val = lut_i8[(x_val as i32 + 128) as usize] as i32;
+            let v_val = v_weight_i8[i] as i32;
+            let prod = l_val * v_val;
+            let abs = prod.abs();
+            if abs > max_abs_int { max_abs_int = abs; }
+        }
+        
+        let max_out_float = (max_abs_int as f32) * combined_scale;
+        let out_scale = if max_out_float == 0.0 { 1.0 } else { max_out_float / 127.0 };
+        
+        let multiplier_f32 = if out_scale == 0.0 { 0.0 } else { combined_scale / out_scale };
+        let q_shift = 15;
+        let mult_int = libm::roundf(multiplier_f32 * ((1 << q_shift) as f32)) as i32;
+        
+        // 3. Process the chunk entirely in integer
+        for i in 0..hidden_dim {
+            let x_val = in_chunk[i];
+            let l_val = lut_i8[(x_val as i32 + 128) as usize] as i32;
+            let v_val = v_weight_i8[i] as i32;
+            let prod = l_val * v_val;
+            
+            let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
             if quantized > 127 { quantized = 127; }
             if quantized < -128 { quantized = -128; }
             out_chunk[i] = quantized as i8;
         }
-
-        out_scales[t] = scale;
+        
+        out_scales[t] = out_scale;
     }
 }

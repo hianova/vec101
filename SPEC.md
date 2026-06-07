@@ -37,12 +37,19 @@ The core compute loop (`vec101_compute`) utilizes branchless SIMD programming ta
 - Leverages `vpaddlq_s8` and `vpaddlq_s16` (Pairwise Accumulation) to hierarchically sum 16 INT8 values into INT32 accumulators in incredibly few cycles.
 
 ## Pure INT8 Operator Fusion
-All linear layer outputs are intercepted before generating `Vec<f32>` arrays.
-`RMSNorm` and `SwiGLU` have been heavily mathematically simplified to take `&[i8]` inputs and directly output `&[i8]` values + a dynamic scale. This pure INT8 dataflow pipeline entirely obliterates the 100ms+ penalty historically associated with floating-point intermediate quantizations.
+All linear layer outputs are intercepted before generating `Vec<f32>` arrays. `RMSNorm` and `SwiGLU` have been meticulously designed to take `&[i8]` inputs and directly output `&[i8]` values + a dynamic scale, completely obliterating the `f32` conversion penalty.
+
+- **Dynamic LUT for SwiGLU**: Since inputs are already quantized to `i8`, the `silu` function only has 256 possible input states. `vec101` dynamically builds a 256-entry `i8 -> i8` Lookup Table **once per token** based on the incoming scale. The inner loop of 4096 dimensions is then reduced to a single O(1) table lookup and an `i8 * i8` integer multiplication, eliminating 4096 float calculations.
+- **Dual-Pass Fixed-Point RMSNorm**: Model weights are pre-quantized to `i8`. The engine calculates standard deviation squares using native `i32` accumulation (`sum(x_i8 * x_i8)`). The inverse RMS is then folded into a highly precise fixed-point multiplier (e.g. `(prod * M) >> 15`), ensuring the element-wise scaling remains 100% within the integer domain.
+
+## `no_std` Multi-threading (Spin-Latch Executor)
+In contrast to standard engines that rely heavily on `std::sync` primitives or heavy libraries like `rayon`, `vec101` implements a custom row-chunking executor that relies solely on `core::sync::atomic::AtomicUsize`.
+- **Zero-Lock Synchronization**: Threads synchronize execution completion purely via atomic spin-latches (`fetch_sub`), minimizing context switch latency.
+- **Pointer Security**: The computation context (`vec101_context`) safely traverses threads via raw `usize` address boundaries, preventing `*const T` struct locking behaviors.
+- **Dual Compatibility**: Through the `std` feature flag, `vec101` falls back seamlessly between concurrent thread spawning (`std::thread::spawn`) and sequential execution for highly restrictive bare-metal hardware.
 
 ## Serialization Format
 Real model weights (e.g. BitNet b1.58) are serialized into the `Safetensors` format by extracting sub-layers into:
 - `{layer}.w_pos_stream` (int64 arrays)
 - `{layer}.w_neg_stream` (int64 arrays)
-- `{layer}.i_stream` (int32 arrays)
 - `{layer}.s_stream` (float32 arrays)

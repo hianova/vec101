@@ -12,18 +12,22 @@ pub struct vec101_block {
 /// Holds pointers to perfectly aligned memory streams to avoid any allocations.
 #[repr(C)]
 pub struct vec101_context {
-    /// Highly compressed 1-bit weights stream.
+    /// Highly compressed 1-bit weights stream. (num_rows * blocks_per_row)
     pub w_stream: *const vec101_block,
-    /// Continuous activation values stream (e.g., INT8).
+    /// Continuous activation values stream. (batch_size * blocks_per_row * 256)
     pub x_stream: *const i8,
-    /// Routing index stream.
-    pub i_stream: *const u32,
-    /// Quantization scaling factor stream.
+    /// Quantization scaling factor stream per row. (num_rows)
     pub s_stream: *const f32,
-    /// Output buffer (subject to cache binning updates).
+    /// Output buffer. (batch_size * num_rows)
     pub out_buffer: *mut f32,
-    /// Total number of 256-bit blocks to process.
-    pub num_blocks: usize,
+    /// Number of tokens processed simultaneously (GEMM Batch Dimension)
+    pub batch_size: usize,
+    /// Number of rows in the weight matrix
+    pub num_rows: usize,
+    /// Number of 256-bit blocks per row
+    pub blocks_per_row: usize,
+    /// Number of parallel threads to use (0 or 1 = sequential)
+    pub num_threads: usize,
 }
 
 // Ensure the structs are Sync and Send if required for multi-threading.

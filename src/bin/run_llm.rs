@@ -2,6 +2,7 @@ use std::io::Write;
 use std::time::Instant;
 use vec101::ops::{attention, rope, rmsnorm_int8, swiglu_int8};
 use vec101::tokenizer::TrieTokenizer;
+use vec101::{vec101_block, vec101_compute, vec101_context};
 
 struct MockModel {
     hidden_dim: usize,
@@ -46,12 +47,14 @@ impl MockModel {
         let mut ffn_i8 = vec![0i8; num_tokens * self.hidden_dim];
         let mut ffn_scales = vec![0.0f32; num_tokens];
         
-        let rms_weight = vec![1.0f32; self.hidden_dim];
-        let ffn_weight = vec![1.0f32; self.hidden_dim];
+        let rms_weight_i8 = vec![127i8; self.hidden_dim];
+        let rms_weight_scale = 1.0 / 127.0;
+        let ffn_weight_i8 = vec![127i8; self.hidden_dim];
+        let ffn_weight_scale = 1.0 / 127.0;
 
         for _layer in 0..self.layers {
             // 1. Fused RMSNorm: i8 -> i8
-            rmsnorm_int8(&x_i8, &rms_weight, 1e-5, &mut norm_i8, &mut norm_scales);
+            rmsnorm_int8(&x_i8, &rms_weight_i8, rms_weight_scale, 1e-5, &mut norm_i8, &mut norm_scales);
 
             // 2. QKV Projection (simulated as float conversion for Attention)
             for t in 0..num_tokens {
@@ -102,7 +105,7 @@ impl MockModel {
             }
 
             // 4. Fused SwiGLU: i8 -> i8 (bypassing persistent f32 allocation)
-            swiglu_int8(&x_i8, &x_scales, &ffn_weight, &mut ffn_i8, &mut ffn_scales);
+            swiglu_int8(&x_i8, &x_scales, &ffn_weight_i8, ffn_weight_scale, &mut ffn_i8, &mut ffn_scales);
 
             // Residual connection 2
             for t in 0..num_tokens {

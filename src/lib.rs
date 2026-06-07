@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
 pub mod compute;
@@ -6,6 +6,7 @@ pub mod memory_tracker;
 pub mod types;
 pub mod feeder;
 pub mod ops;
+pub mod ffi;
 pub mod tokenizer;
 
 pub use compute::vec101_compute;
