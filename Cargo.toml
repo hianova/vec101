@@ -13,17 +13,11 @@ readme = "README.md"
 default = ["std"]
 std = []
 gpu-metal = ["metal", "objc"]
-gpu-cuda = [] # Uncomment dependencies in [dependencies] for CUDA support
-gpu-vulkan = []
-gpu-wgpu = []
 
 [dependencies]
 libm = "0.2.8"
 memmap2 = "0.9.10"
 safetensors = "0.7.0"
-
-# cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
-# cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = { version = "0.28", optional = true }

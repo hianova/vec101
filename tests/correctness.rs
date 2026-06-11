@@ -82,9 +82,9 @@ fn test_vec101_correctness() {
 
     let sim = cosine_similarity(&out_expected, &out_actual);
     println!("Cosine Similarity: {}", sim);
-    #[cfg(any(feature = "gpu-metal", feature = "gpu-cuda"))]
+    #[cfg(feature = "gpu-metal")]
     let threshold = 0.75;
-    #[cfg(not(any(feature = "gpu-metal", feature = "gpu-cuda")))]
+    #[cfg(not(feature = "gpu-metal"))]
     let threshold = 0.99;
     assert!(sim > threshold, "Similarity {} is below threshold {}", sim, threshold);
 }

@@ -29,9 +29,6 @@ pub mod scalar;
 #[cfg(feature = "gpu-metal")]
 pub mod metal_backend;
 
-#[cfg(feature = "gpu-cuda")]
-pub mod cuda_backend;
-
 // ==========================================
 // Main Dispatcher
 // ==========================================
@@ -41,16 +38,6 @@ pub mod cuda_backend;
 /// Caller must ensure that the provided context contains valid, aligned memory pointers.
 pub unsafe fn vec101_compute(ctx: &vec101_context) {
     if ctx.batch_size == 0 || ctx.num_rows == 0 {
-        return;
-    }
-
-    #[cfg(feature = "gpu-cuda")]
-    {
-        let num_micro = ctx.blocks_per_row * 8;
-        let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
-        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
-        let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
-        cuda_backend::cuda_compute(ctx, &x_blocks, x_scale);
         return;
     }
 
