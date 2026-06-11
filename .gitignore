@@ -2,3 +2,7 @@
 venv/
 .DS_Store
 *.safetensors
+TODO.md
+/tools/bitnet_b1_58-large/
+/tools/venv/
+/check_err.log

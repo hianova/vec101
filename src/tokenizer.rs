@@ -49,7 +49,7 @@ impl TrieTokenizer {
             let mut best_match = None;
             let mut best_len = 0;
 
-            for j in i..bytes.len() {
+            for (j, _byte) in bytes.iter().enumerate().skip(i) {
                 if let Some(next_node) = curr.children.get(&bytes[j]) {
                     curr = next_node;
                     if let Some(id) = curr.token_id {
@@ -83,5 +83,29 @@ impl TrieTokenizer {
             }
         }
         String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn test_trie_tokenizer() {
+        let mut tokenizer = TrieTokenizer::new(0);
+        tokenizer.add_token(b"Hello", 1);
+        tokenizer.add_token(b"World", 2);
+        tokenizer.add_token(b" ", 3);
+        
+        let encoded = tokenizer.encode("Hello World");
+        assert_eq!(encoded, vec![1, 3, 2]);
+        
+        let decoded = tokenizer.decode(&encoded);
+        assert_eq!(decoded, "Hello World");
+        
+        // Test unknown token
+        let encoded_unk = tokenizer.encode("XYZ");
+        assert_eq!(encoded_unk, vec![0, 0, 0]); // 3 bytes, 3 unk tokens
     }
 }

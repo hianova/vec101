@@ -37,6 +37,8 @@ pub mod cuda_backend;
 // ==========================================
 
 /// Main compute dispatcher.
+/// # Safety
+/// Caller must ensure that the provided context contains valid, aligned memory pointers.
 pub unsafe fn vec101_compute(ctx: &vec101_context) {
     if ctx.batch_size == 0 || ctx.num_rows == 0 {
         return;
@@ -44,9 +46,9 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
 
     #[cfg(feature = "gpu-cuda")]
     {
-        let mut x_blocks = alloc::vec::Vec::with_capacity(ctx.blocks_per_row * ctx.batch_size);
-        unsafe { x_blocks.set_len(ctx.blocks_per_row * ctx.batch_size); }
-        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * ctx.blocks_per_row * 256) };
+        let num_micro = ctx.blocks_per_row * 8;
+        let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
+        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
         let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
         cuda_backend::cuda_compute(ctx, &x_blocks, x_scale);
         return;
@@ -54,10 +56,9 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
 
     #[cfg(feature = "gpu-metal")]
     {
-        // Allocate zero-initialized memory for quantized x bits
-        let mut x_blocks = alloc::vec::Vec::with_capacity(ctx.blocks_per_row * ctx.batch_size);
-        unsafe { x_blocks.set_len(ctx.blocks_per_row * ctx.batch_size); }
-        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * ctx.blocks_per_row * 256) };
+        let num_micro = ctx.blocks_per_row * 8;
+        let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
+        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
         let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
         metal_backend::metal_compute(ctx, &x_blocks, x_scale);
         return;
@@ -66,14 +67,14 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
     let num_threads = if ctx.num_threads == 0 { 1 } else { ctx.num_threads };
     let is_gemm = ctx.batch_size > 1;
 
-    let in_features = ctx.blocks_per_row * 256;
+    let in_features = ctx.blocks_per_row * 2048; // 8 * 256
     let padded_batch = (ctx.batch_size + 63) & !63; // Pad to 64 for unrolled registers
     
     #[cfg(target_arch = "aarch64")]
     {
         if ctx.batch_size > 1 {
             let num_threads = core::cmp::min(ctx.batch_size, 16);
-            let chunk_size = (ctx.num_rows + num_threads - 1) / num_threads;
+            let chunk_size = ctx.num_rows.div_ceil(num_threads);
             let mut threads = alloc::vec::Vec::with_capacity(num_threads);
 
             for t_idx in 0..num_threads {
@@ -89,8 +90,7 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
 
                 let handle = std::thread::spawn(move || {
                     let ctx_ref = unsafe { &*(ctx_ptr as *const vec101_context) };
-                    let mut row_sums = alloc::vec::Vec::with_capacity(batch_size);
-                    unsafe { row_sums.set_len(batch_size); }
+                    let mut row_sums = alloc::vec![0i32; batch_size];
 
                     for row in start_row..end_row {
                         neon::process_row_neon_gemm(row, ctx_ref, &mut row_sums);
@@ -131,7 +131,7 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
         return;
     }
 
-    let chunk_size = (ctx.num_rows + num_threads - 1) / num_threads;
+    let chunk_size = ctx.num_rows.div_ceil(num_threads);
     let remaining = Arc::new(AtomicUsize::new(num_threads));
 
     for t in 0..num_threads {

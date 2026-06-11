@@ -2,9 +2,11 @@
 use metal::*;
 #[cfg(feature = "gpu-metal")]
 use core::ffi::c_void;
-use crate::types::{vec101_context, vec101_block};
+use crate::types::{vec101_context, vec101_block, Vec101SuperBlock};
 
 #[cfg(feature = "gpu-metal")]
+/// # Safety
+/// Assumes all context pointers are valid and aligned.
 pub unsafe fn metal_compute(ctx: &vec101_context, x_blocks: &[vec101_block], x_scale: f32) {
     let device = Device::system_default().expect("No Metal device found");
     let command_queue = device.new_command_queue();
@@ -15,10 +17,10 @@ pub unsafe fn metal_compute(ctx: &vec101_context, x_blocks: &[vec101_block], x_s
     let kernel = library.get_function("vec101_gemv", None).unwrap();
     let pipeline_state = device.new_compute_pipeline_state_with_function(&kernel).unwrap();
     
-    let w_len = (ctx.num_rows * ctx.blocks_per_row * core::mem::size_of::<vec101_block>()) as u64;
+    let w_len = (ctx.num_rows * ctx.blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()) as u64;
     let s_len = (ctx.num_rows * core::mem::size_of::<f32>()) as u64;
-    let out_len = (ctx.num_rows * core::mem::size_of::<f32>()) as u64;
-    let x_len = (x_blocks.len() * core::mem::size_of::<vec101_block>()) as u64;
+    let out_len = (ctx.batch_size * ctx.num_rows * core::mem::size_of::<f32>()) as u64;
+    let x_len = core::mem::size_of_val(x_blocks) as u64;
     
     // Zero-copy wrapping for large weight buffers
     let w_buffer = device.new_buffer_with_bytes_no_copy(
@@ -58,10 +60,12 @@ pub unsafe fn metal_compute(ctx: &vec101_context, x_blocks: &[vec101_block], x_s
     compute_encoder.set_buffer(3, Some(&out_buffer), 0);
     
     let blocks_per_row = ctx.blocks_per_row as u32;
+    let num_rows = ctx.num_rows as u32;
     compute_encoder.set_bytes(4, core::mem::size_of::<u32>() as u64, &blocks_per_row as *const _ as *const c_void);
     compute_encoder.set_bytes(5, core::mem::size_of::<f32>() as u64, &x_scale as *const _ as *const c_void);
+    compute_encoder.set_bytes(6, core::mem::size_of::<u32>() as u64, &num_rows as *const _ as *const c_void);
     
-    let grid_size = MTLSize::new(ctx.num_rows as u64, 1, 1);
+    let grid_size = MTLSize::new(ctx.num_rows as u64, ctx.batch_size as u64, 1);
     
     // Calculate threadgroup size (M-series usually max 1024, but let's use a safe value like 256 or the pipeline's max)
     let max_threads = pipeline_state.max_total_threads_per_threadgroup();

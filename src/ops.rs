@@ -244,8 +244,7 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: f32, eps: f32, out
             for ((&x, &w), out) in x_chunks.remainder().iter().zip(w_chunks.remainder()).zip(out_chunks.into_remainder()) {
                 let prod = (x as i32) * (w as i32);
                 let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
-                if quantized > 127 { quantized = 127; }
-                if quantized < -128 { quantized = -128; }
+                quantized = quantized.clamp(-128, 127);
                 *out = quantized as i8;
             }
         }
@@ -288,8 +287,7 @@ pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight_i8: &[i8], v_weight_sca
         let mut lut_i8 = [0i8; 256];
         for i in 0..256 {
             let mut q_val = libm::roundf(lut_f32[i] * inv_lut_scale) as i32;
-            if q_val > 127 { q_val = 127; }
-            if q_val < -128 { q_val = -128; }
+            q_val = q_val.clamp(-128, 127);
             lut_i8[i] = q_val as i8;
         }
         
@@ -404,8 +402,7 @@ pub fn swiglu_int8(q: &[i8], in_scales: &[f32], v_weight_i8: &[i8], v_weight_sca
                 let l_val = lut_i8[(x as i32 + 128) as usize] as i32;
                 let prod = l_val * (v as i32);
                 let mut quantized = ((prod as i64 * mult_int as i64) >> q_shift) as i32;
-                if quantized > 127 { quantized = 127; }
-                if quantized < -128 { quantized = -128; }
+                quantized = quantized.clamp(-128, 127);
                 *out = quantized as i8;
             }
         }
@@ -461,4 +458,65 @@ pub fn quantize_to_ternary(x_i8: &[i8], blocks: &mut [vec101_block]) -> f32 {
         };
     }
     scale
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn test_rmsnorm() {
+        let mut x = vec![1.0, 2.0, 3.0, 4.0];
+        let weight = vec![1.0, 1.0, 1.0, 1.0];
+        let eps = 1e-5;
+        rmsnorm(&mut x, &weight, eps);
+        // mean_sq = 7.5, rms = 2.7386
+        assert!((x[0] - 0.365148).abs() < 1e-4);
+        assert!((x[3] - 1.46059).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_rmsnorm_int8() {
+        let q = vec![10i8, 20i8, 30i8, 40i8];
+        let weight_i8 = vec![127i8; 4];
+        let mut out_q = vec![0i8; 4];
+        let mut out_scales = vec![0.0f32; 1];
+        rmsnorm_int8(&q, &weight_i8, 1.0/127.0, 1e-5, &mut out_q, &mut out_scales);
+        assert!(out_scales[0] > 0.0);
+        // The output should be quantized. Element 3 is the largest, should map near 127.
+        assert!(out_q[3] >= 126);
+    }
+
+    #[test]
+    fn test_swiglu_int8() {
+        let q = vec![50i8, -50i8, 0i8, 100i8];
+        let in_scales = vec![0.1f32];
+        let v_weight_i8 = vec![127i8; 4];
+        let mut out_q = vec![0i8; 4];
+        let mut out_scales = vec![0.0f32; 1];
+        swiglu_int8(&q, &in_scales, &v_weight_i8, 1.0/127.0, &mut out_q, &mut out_scales);
+        assert!(out_scales[0] > 0.0);
+    }
+
+    #[test]
+    fn test_quantize_to_ternary() {
+        let mut x = vec![0i8; 256];
+        x[0] = 50;
+        x[1] = -50;
+        x[2] = 0;
+        let mut blocks = vec![crate::types::vec101_block { w_pos_bits: [0;4], w_neg_bits: [0;4] }];
+        quantize_to_ternary(&x, &mut blocks);
+        assert_eq!(blocks[0].w_pos_bits[0] & 1, 1);
+        assert_eq!(blocks[0].w_neg_bits[0] & 2, 2);
+        assert_eq!(blocks[0].w_pos_bits[0] & 4, 0);
+    }
+
+    #[test]
+    fn test_rope() {
+        let mut q = vec![1.0, 0.0, 1.0, 0.0];
+        let mut k = vec![1.0, 0.0, 1.0, 0.0];
+        rope(&mut q, &mut k, 0, 4, 2, 10000.0);
+        assert_eq!(q[0], 1.0); // At pos 0, rot is 0
+    }
 }

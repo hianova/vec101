@@ -19,8 +19,7 @@ pub fn dynamic_quantize_to_int8(input: &[f32]) -> (alloc::vec::Vec<i8>, f32) {
     let mut quantized = alloc::vec::Vec::with_capacity(input.len());
     for &v in input {
         let mut q = libm::roundf(v * inv_scale) as i32;
-        if q > 127 { q = 127; }
-        if q < -128 { q = -128; }
+        q = q.clamp(-128, 127);
         quantized.push(q as i8);
     }
 
@@ -39,4 +38,31 @@ pub fn memory_reorder(quantized_input: &[i8], i_stream: &[u32], block_size: usiz
     }
     
     x_stream
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn test_dynamic_quantize() {
+        let input = vec![1.0, 2.0, -10.0, 0.0];
+        let (quantized, scale) = dynamic_quantize_to_int8(&input);
+        
+        // max_abs = 10.0. scale = 10.0 / 127
+        assert!((scale - (10.0 / 127.0)).abs() < 1e-5);
+        assert_eq!(quantized[2], -127);
+        assert_eq!(quantized[3], 0);
+    }
+    
+    #[test]
+    fn test_memory_reorder() {
+        let input = vec![1, 2, 3];
+        let i_stream = vec![0, 1]; // 2 blocks
+        let out = memory_reorder(&input, &i_stream, 2);
+        // total elements = 2 * 2 = 4
+        // elements: 1, 2, 3, 1 (wrapping)
+        assert_eq!(out, vec![1, 2, 3, 1]);
+    }
 }

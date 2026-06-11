@@ -13,12 +13,11 @@ readme = "README.md"
 default = ["std"]
 std = []
 gpu-metal = ["metal", "objc"]
-# gpu-cuda = ["cuda-core", "cuda-device"] # Uncomment for CUDA support (requires git dependency)
+gpu-cuda = [] # Uncomment dependencies in [dependencies] for CUDA support
 gpu-vulkan = []
 gpu-wgpu = []
 
 [dependencies]
-dualcache-ff = { version = "0.4.1", optional = true, default-features = false }
 libm = "0.2.8"
 memmap2 = "0.9.10"
 safetensors = "0.7.0"
@@ -39,9 +38,14 @@ loom = "0.7.2"
 rand = "0.8.5"
 
 [[bench]]
-name = "perf_bench"
+name = "benchmark"
+path = "benches/benchmark.rs"
 harness = false
 
-[[bin]]
-name = "benchmark"
-path = "src/bin/benchmark.rs"
+[[bench]]
+name = "perf_bench"
+path = "benches/perf_bench.rs"
+harness = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

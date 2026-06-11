@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::io::Write;
 use std::time::Instant;
 use vec101::ops::{attention, rope, rmsnorm_int8, swiglu_int8};
