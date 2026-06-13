@@ -43,12 +43,16 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
 
     #[cfg(feature = "gpu-metal")]
     {
-        let num_micro = ctx.blocks_per_row * 8;
-        let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
-        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
-        let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
-        metal_backend::metal_compute(ctx, &x_blocks, x_scale);
-        return;
+        if ctx.quant_type == crate::types::QuantType::Bit1_58 {
+            let num_micro = ctx.blocks_per_row * 8;
+            let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
+            let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
+            let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
+            metal_backend::metal_compute(ctx, &x_blocks, x_scale);
+            return;
+        } else {
+            panic!("Metal backend for Q4_0 is not yet implemented in this dual-engine layout.");
+        }
     }
 
     let num_threads = if ctx.num_threads == 0 { 1 } else { ctx.num_threads };

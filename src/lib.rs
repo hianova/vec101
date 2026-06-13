@@ -21,6 +21,8 @@ pub mod attention;
 pub mod ops;
 pub mod ffi;
 pub mod tokenizer;
+#[cfg(feature = "std")]
+pub mod loader;
 
 pub use compute::vec101_compute;
 pub use memory_tracker::{check_memory_leaks, check_thread_drops, ScopedResource};

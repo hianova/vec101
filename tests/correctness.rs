@@ -65,7 +65,8 @@ fn test_vec101_correctness() {
 
     let mut out_actual = vec![0f32; batch_size * num_rows];
     let ctx = vec101_context {
-        w_stream: w_stream.as_ptr(),
+        quant_type: vec101::types::QuantType::Bit1_58,
+        w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
         out_buffer: out_actual.as_mut_ptr(),

@@ -31,6 +31,22 @@ pub fn swiglu(x: &mut [f32], v: &[f32]) {
     }
 }
 
+#[inline(always)]
+pub fn gelu(x: f32) -> f32 {
+    // GELU approximation
+    let c1 = 0.044715;
+    let c2 = 0.7978845608; // sqrt(2/pi)
+    let inner = c2 * (x + c1 * x * x * x);
+    0.5 * x * (1.0 + libm::tanhf(inner))
+}
+
+/// Applies GeGLU activation over a slice (for Gemma models).
+pub fn geglu(x: &mut [f32], v: &[f32]) {
+    for i in 0..x.len() {
+        x[i] = gelu(x[i]) * v[i];
+    }
+}
+
 /// Rotary Position Embedding (RoPE).
 /// Batched: `q` and `k` contain `K` tokens. `start_pos` is the position of the first token.
 pub fn rope(q: &mut [f32], k: &mut [f32], start_pos: usize, hidden_dim: usize, head_dim: usize, base: f32) {
