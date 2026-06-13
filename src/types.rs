@@ -50,10 +50,10 @@ pub struct Vec101SuperBlock {
 /// 執行狀態與投機解碼控制
 #[derive(Debug, Clone, Copy)]
 pub enum EngineState {
-    /// 跑奇數層，利用 MTP 一次吐 N 個 Token
-    Drafting { target_tokens: usize },
-    /// 跑偶數層，Batch Size = 3 進行驗證
-    Verifying { draft_tokens: [u32; 3] },
+    /// 草稿模式：跳過特定層數（例如 stride=2 也就是跳過偶數層），利用 MTP 預測後續 Token
+    Drafting { target_tokens: usize, layer_skip_stride: usize },
+    /// 驗證模式：動態長度的 Draft Token 驗證，補齊被跳過的運算
+    Verifying { draft_tokens: [u32; 8], draft_len: usize },
     /// Markdown 擴散模式，Batch Size = N
     CanvasDiffusion { blocks: usize },
 }

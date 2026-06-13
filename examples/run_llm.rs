@@ -30,6 +30,7 @@ impl MockModel {
         v_cache: &mut [Vec<f32>],
         logits_out: &mut [f32],
         vocab_size: usize,
+        is_draft: bool,
     ) {
         let num_tokens = tokens.len();
         // The main dataflow is now strictly INT8!
@@ -54,6 +55,10 @@ impl MockModel {
         let ffn_weight_scale = 1.0 / 127.0;
 
         for _layer in 0..self.layers {
+            if is_draft && _layer % 2 == 0 {
+                continue; // Self-Speculative Decoding: Layer Skipping
+            }
+            
             // 1. Fused RMSNorm: i8 -> i8
             rmsnorm_int8(&x_i8, &rms_weight_i8, rms_weight_scale, 1e-5, &mut norm_i8, &mut norm_scales);
 
@@ -171,13 +176,10 @@ fn main() {
     }
 
     let target_model = MockModel::new(4096, 32, 32);
-    let draft_model = MockModel::new(1024, 16, 8);
 
     let max_seq_len = 2048;
     let mut target_k_cache = vec![vec![0.0; target_model.hidden_dim]; max_seq_len];
     let mut target_v_cache = vec![vec![0.0; target_model.hidden_dim]; max_seq_len];
-    let mut draft_k_cache = vec![vec![0.0; draft_model.hidden_dim]; max_seq_len];
-    let mut draft_v_cache = vec![vec![0.0; draft_model.hidden_dim]; max_seq_len];
 
     let mut current_pos = 0;
     let prompt = "Hello";
@@ -191,10 +193,8 @@ fn main() {
 
     let prefill_start = Instant::now();
     let mut target_logits = vec![0.0; accepted_tokens.len() * tokenizer.vocab_size as usize];
-    let mut draft_logits = vec![0.0; accepted_tokens.len() * tokenizer.vocab_size as usize];
 
-    target_model.forward(&accepted_tokens, 0, &mut target_k_cache, &mut target_v_cache, &mut target_logits, tokenizer.vocab_size as usize);
-    draft_model.forward(&accepted_tokens, 0, &mut draft_k_cache, &mut draft_v_cache, &mut draft_logits, tokenizer.vocab_size as usize);
+    target_model.forward(&accepted_tokens, 0, &mut target_k_cache, &mut target_v_cache, &mut target_logits, tokenizer.vocab_size as usize, false);
     
     current_pos += accepted_tokens.len();
     let mut last_accepted_token = sample_argmax(&target_logits[(accepted_tokens.len()-1) * tokenizer.vocab_size as usize..]);
@@ -216,7 +216,7 @@ fn main() {
 
         for _ in 0..num_draft_tokens {
             let mut logits = vec![0.0; tokenizer.vocab_size as usize];
-            draft_model.forward(&[draft_input], draft_pos, &mut draft_k_cache, &mut draft_v_cache, &mut logits, tokenizer.vocab_size as usize);
+            target_model.forward(&[draft_input], draft_pos, &mut target_k_cache, &mut target_v_cache, &mut logits, tokenizer.vocab_size as usize, true);
             let next_draft_tok = sample_argmax(&logits);
             drafted_tokens.push(next_draft_tok);
             draft_input = next_draft_tok;
@@ -227,7 +227,7 @@ fn main() {
         verification_input.extend_from_slice(&drafted_tokens);
         
         let mut target_logits = vec![0.0; verification_input.len() * tokenizer.vocab_size as usize];
-        target_model.forward(&verification_input, current_pos, &mut target_k_cache, &mut target_v_cache, &mut target_logits, tokenizer.vocab_size as usize);
+        target_model.forward(&verification_input, current_pos, &mut target_k_cache, &mut target_v_cache, &mut target_logits, tokenizer.vocab_size as usize, false);
 
         let mut n_accepted = 0;
         for i in 0..num_draft_tokens {
