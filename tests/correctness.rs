@@ -73,7 +73,7 @@ fn test_vec101_correctness() {
         num_rows,
         blocks_per_row,
         num_threads: 4,
-        state: EngineState::Drafting { target_tokens: 1 },
+        state: EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
     };
 
     unsafe {

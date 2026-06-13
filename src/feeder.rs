@@ -36,8 +36,72 @@ pub fn memory_reorder(quantized_input: &[i8], i_stream: &[u32], block_size: usiz
     for i in 0..total_elements {
         x_stream[i] = quantized_input[i % quantized_input.len()];
     }
-    
     x_stream
+}
+
+use crate::types::{Vec101SuperBlock, vec101_block, f32_to_f16};
+
+/// Packs standard FP32 model weights into the highly optimized Dual-Rail `Vec101SuperBlock` format.
+/// Applications should use this to load model weights (e.g. from safetensors) into vec101.
+/// 
+/// # Arguments
+/// * `weights` - The flattened continuous FP32 weight array. Length must be a multiple of 2048.
+/// 
+/// # Panics
+/// Panics if `weights.len()` is not a multiple of 2048.
+pub fn pack_weights_to_superblocks(weights: &[f32]) -> alloc::vec::Vec<Vec101SuperBlock> {
+    assert_eq!(weights.len() % 2048, 0, "Weight length must be a multiple of 2048 for SuperBlock packing");
+    let num_superblocks = weights.len() / 2048;
+    let mut superblocks = alloc::vec::Vec::with_capacity(num_superblocks);
+
+    for sb_idx in 0..num_superblocks {
+        let sb_weights = &weights[sb_idx * 2048..(sb_idx + 1) * 2048];
+        let mut sb = Vec101SuperBlock {
+            scales: [0; 8],
+            offsets: [0; 8],
+            _padding: [0; 32],
+            blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8],
+        };
+
+        for b_idx in 0..8 {
+            let block_w = &sb_weights[b_idx * 256..(b_idx + 1) * 256];
+            
+            // BitNet 1.58-bit Quantization: Scale = Mean Absolute Value
+            let mut sum_abs = 0.0f32;
+            for &w in block_w {
+                sum_abs += libm::fabsf(w);
+            }
+            let mean_abs = sum_abs / 256.0;
+            let scale = if mean_abs == 0.0 { 1.0 } else { mean_abs };
+            let inv_scale = 1.0 / scale;
+
+            sb.scales[b_idx] = f32_to_f16(scale);
+
+            let mut pos_bits = [0u64; 4];
+            let mut neg_bits = [0u64; 4];
+
+            for (i, &w) in block_w.iter().enumerate() {
+                let q = libm::roundf(w * inv_scale) as i32;
+                let ternary = q.clamp(-1, 1);
+                
+                let u64_idx = i / 64;
+                let bit_shift = i % 64;
+
+                if ternary == 1 {
+                    pos_bits[u64_idx] |= 1 << bit_shift;
+                } else if ternary == -1 {
+                    neg_bits[u64_idx] |= 1 << bit_shift;
+                }
+            }
+
+            sb.blocks[b_idx].w_pos_bits = pos_bits;
+            sb.blocks[b_idx].w_neg_bits = neg_bits;
+        }
+
+        superblocks.push(sb);
+    }
+
+    superblocks
 }
 
 #[cfg(test)]
@@ -64,5 +128,28 @@ mod tests {
         // total elements = 2 * 2 = 4
         // elements: 1, 2, 3, 1 (wrapping)
         assert_eq!(out, vec![1, 2, 3, 1]);
+    }
+
+    #[test]
+    fn test_pack_weights_to_superblocks() {
+        // Create 2048 dummy weights
+        let mut weights = vec![0.0f32; 2048];
+        // Set some specific values
+        weights[0] = 2.0;   // Will be +1
+        weights[1] = -2.0;  // Will be -1
+        weights[64] = 2.0;  // Next u64 pos_bits
+        
+        let superblocks = pack_weights_to_superblocks(&weights);
+        assert_eq!(superblocks.len(), 1);
+        
+        let sb = &superblocks[0];
+        let block0 = &sb.blocks[0];
+        
+        // weights[0] -> pos_bits[0] bit 0
+        assert_eq!(block0.w_pos_bits[0] & 1, 1);
+        // weights[1] -> neg_bits[0] bit 1
+        assert_eq!(block0.w_neg_bits[0] & 2, 2);
+        // weights[64] -> pos_bits[1] bit 0
+        assert_eq!(block0.w_pos_bits[1] & 1, 1);
     }
 }

@@ -24,6 +24,22 @@ pub fn f16_to_f32(h: f16) -> f32 {
     f32::from_bits(bits)
 }
 
+#[inline(always)]
+pub fn f32_to_f16(f: f32) -> f16 {
+    let bits = f.to_bits();
+    let sign = (bits >> 16) & 0x8000;
+    let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
+    let frac = (bits >> 13) & 0x3ff;
+    
+    if exp <= 0 {
+        sign as f16 // flush subnormals to zero
+    } else if exp >= 31 {
+        (sign | 0x7c00) as f16 // infinity
+    } else {
+        (sign | ((exp as u32) << 10) | frac) as f16
+    }
+}
+
 /// The fundamental compute block for vec101.
 #[repr(C, align(64))]
 #[derive(Debug, Clone, Copy)]
