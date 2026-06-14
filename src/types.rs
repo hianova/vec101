@@ -41,7 +41,7 @@ pub fn f32_to_f16(f: f32) -> f16 {
 }
 
 /// The fundamental compute block for vec101.
-#[repr(C, align(64))]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 #[archive_attr(repr(C))]
@@ -51,7 +51,7 @@ pub struct vec101_block {
 }
 
 /// 完美對齊 64-Byte，且維持 256 維度的終極設計！
-#[repr(C, align(64))]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[archive(check_bytes)]
 #[archive_attr(repr(C))]
@@ -75,16 +75,7 @@ pub struct BlockQ4_0 {
     pub qs: [u8; 16],     // 32 個 4-bit 權重打包
 }
 
-/// The engine state for speculative execution and batch processing
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineState {
-    /// 草稿模式：跳過特定層數（例如 stride=2 也就是跳過偶數層），利用 MTP 預測後續 Token
-    Drafting { target_tokens: usize, layer_skip_stride: usize },
-    /// 驗證模式：動態長度的 Draft Token 驗證，補齊被跳過的運算
-    Verifying { draft_tokens: [u32; 8], draft_len: usize },
-    /// Markdown 擴散模式，Batch Size = N
-    CanvasDiffusion { blocks: usize },
-}
+
 
 /// Supported quantization types for Dual Engine
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -129,6 +120,12 @@ pub struct vec101_context {
     pub s_stream: *const f32,
     /// Output buffer.
     pub out_buffer: *mut f32,
+    /// Pointers to Paged Attention KV blocks.
+    pub kv_blocks: *const *const f32,
+    /// Number of valid blocks in the kv_blocks array.
+    pub num_blocks: usize,
+    /// Number of tokens per block (e.g. 16 or 64).
+    pub block_size: usize,
     /// Number of tokens processed simultaneously (GEMM Batch Dimension)
     pub batch_size: usize,
     /// Number of rows in the weight matrix
@@ -137,8 +134,6 @@ pub struct vec101_context {
     pub blocks_per_row: usize,
     /// Number of parallel threads to use
     pub num_threads: usize,
-    /// Current execution state (Speculative decoding routing)
-    pub state: EngineState,
 }
 
 unsafe impl Send for vec101_context {}

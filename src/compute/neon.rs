@@ -171,11 +171,54 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                 vst1q_s8(w_micro.as_mut_ptr().add(offset + 16), w_vec_hi);
             }
 
-            for b in 0..ctx.batch_size {
-                let x_batch_ptr = ctx.x_stream.add(b * in_features);
+            let mut b_idx = 0;
+            while b_idx + 3 < ctx.batch_size {
+                let ptr0 = ctx.x_stream.add((b_idx + 0) * in_features);
+                let ptr1 = ctx.x_stream.add((b_idx + 1) * in_features);
+                let ptr2 = ctx.x_stream.add((b_idx + 2) * in_features);
+                let ptr3 = ctx.x_stream.add((b_idx + 3) * in_features);
+                let mut acc0 = vdupq_n_s32(0);
+                let mut acc1 = vdupq_n_s32(0);
+                let mut acc2 = vdupq_n_s32(0);
+                let mut acc3 = vdupq_n_s32(0);
+                
+                for chunk in 0..16 { 
+                    let offset = col * 2048 + sub_blk * 256 + chunk * 16;
+                    let w_val = vld1q_s8(w_micro.as_ptr().add(chunk * 16));
+                    let x0 = vld1q_s8(ptr0.add(offset));
+                    let x1 = vld1q_s8(ptr1.add(offset));
+                    let x2 = vld1q_s8(ptr2.add(offset));
+                    let x3 = vld1q_s8(ptr3.add(offset));
+
+                    core::arch::asm!(
+                        "sdot {acc0:v}.4s, {x0:v}.16b, {w:v}.16b",
+                        "sdot {acc1:v}.4s, {x1:v}.16b, {w:v}.16b",
+                        "sdot {acc2:v}.4s, {x2:v}.16b, {w:v}.16b",
+                        "sdot {acc3:v}.4s, {x3:v}.16b, {w:v}.16b",
+                        acc0 = inout(vreg) acc0,
+                        acc1 = inout(vreg) acc1,
+                        acc2 = inout(vreg) acc2,
+                        acc3 = inout(vreg) acc3,
+                        x0 = in(vreg) x0,
+                        x1 = in(vreg) x1,
+                        x2 = in(vreg) x2,
+                        x3 = in(vreg) x3,
+                        w = in(vreg) w_val,
+                    );
+                }
+                row_sums[b_idx + 0] += (vaddvq_s32(acc0) as f32) * micro_scale;
+                row_sums[b_idx + 1] += (vaddvq_s32(acc1) as f32) * micro_scale;
+                row_sums[b_idx + 2] += (vaddvq_s32(acc2) as f32) * micro_scale;
+                row_sums[b_idx + 3] += (vaddvq_s32(acc3) as f32) * micro_scale;
+                b_idx += 4;
+            }
+
+            // Tail processing for remainder
+            while b_idx < ctx.batch_size {
+                let x_batch_ptr = ctx.x_stream.add(b_idx * in_features);
                 let mut acc = vdupq_n_s32(0);
 
-                for chunk in 0..16 { // 16 chunks of 16 bytes = 256 bytes per micro block
+                for chunk in 0..16 {
                     let offset = col * 2048 + sub_blk * 256 + chunk * 16;
                     let x_val = vld1q_s8(x_batch_ptr.add(offset));
                     let w_val = vld1q_s8(w_micro.as_ptr().add(chunk * 16));
@@ -189,7 +232,8 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                 }
 
                 let sum = vaddvq_s32(acc);
-                row_sums[b] += (sum as f32) * micro_scale;
+                row_sums[b_idx] += (sum as f32) * micro_scale;
+                b_idx += 1;
             }
         }
     }
@@ -213,22 +257,79 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
     let mask = vdupq_n_u8(0x0F);
     let eight = vdupq_n_u8(8);
     
-    for b in 0..ctx.batch_size {
-        let x_batch_ptr = ctx.x_stream.add(b * in_features);
-        
+    let mut b_idx = 0;
+    while b_idx + 3 < ctx.batch_size {
         for col in 0..q4_blocks_per_row {
             let block_idx = row * q4_blocks_per_row + col;
             let w_block = &(*(ctx.w_stream as *const crate::types::BlockQ4_0).add(block_idx));
             
             let q_vec = vld1q_u8(w_block.qs.as_ptr());
-            
             let q0_u8 = vandq_u8(q_vec, mask);
             let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
-            
             let q1_u8 = vshrq_n_u8::<4>(q_vec);
             let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
             
-            let x_ptr = x_batch_ptr.add(col * 32);
+            let x_ptr0 = ctx.x_stream.add((b_idx + 0) * in_features + col * 32);
+            let x_ptr1 = ctx.x_stream.add((b_idx + 1) * in_features + col * 32);
+            let x_ptr2 = ctx.x_stream.add((b_idx + 2) * in_features + col * 32);
+            let x_ptr3 = ctx.x_stream.add((b_idx + 3) * in_features + col * 32);
+            
+            let x_vecs0 = vld2q_s8(x_ptr0);
+            let x_vecs1 = vld2q_s8(x_ptr1);
+            let x_vecs2 = vld2q_s8(x_ptr2);
+            let x_vecs3 = vld2q_s8(x_ptr3);
+            
+            let mut acc0 = vdupq_n_s32(0);
+            let mut acc1 = vdupq_n_s32(0);
+            let mut acc2 = vdupq_n_s32(0);
+            let mut acc3 = vdupq_n_s32(0);
+            
+            core::arch::asm!(
+                "sdot {acc0:v}.4s, {x00:v}.16b, {w0:v}.16b",
+                "sdot {acc0:v}.4s, {x01:v}.16b, {w1:v}.16b",
+                "sdot {acc1:v}.4s, {x10:v}.16b, {w0:v}.16b",
+                "sdot {acc1:v}.4s, {x11:v}.16b, {w1:v}.16b",
+                "sdot {acc2:v}.4s, {x20:v}.16b, {w0:v}.16b",
+                "sdot {acc2:v}.4s, {x21:v}.16b, {w1:v}.16b",
+                "sdot {acc3:v}.4s, {x30:v}.16b, {w0:v}.16b",
+                "sdot {acc3:v}.4s, {x31:v}.16b, {w1:v}.16b",
+                acc0 = inout(vreg) acc0,
+                acc1 = inout(vreg) acc1,
+                acc2 = inout(vreg) acc2,
+                acc3 = inout(vreg) acc3,
+                x00 = in(vreg) x_vecs0.0,
+                x01 = in(vreg) x_vecs0.1,
+                x10 = in(vreg) x_vecs1.0,
+                x11 = in(vreg) x_vecs1.1,
+                x20 = in(vreg) x_vecs2.0,
+                x21 = in(vreg) x_vecs2.1,
+                x30 = in(vreg) x_vecs3.0,
+                x31 = in(vreg) x_vecs3.1,
+                w0 = in(vreg) q0_s8,
+                w1 = in(vreg) q1_s8,
+            );
+            
+            let d = f16_to_f32(w_block.d);
+            row_sums[b_idx + 0] += (vaddvq_s32(acc0) as f32) * d;
+            row_sums[b_idx + 1] += (vaddvq_s32(acc1) as f32) * d;
+            row_sums[b_idx + 2] += (vaddvq_s32(acc2) as f32) * d;
+            row_sums[b_idx + 3] += (vaddvq_s32(acc3) as f32) * d;
+        }
+        b_idx += 4;
+    }
+    
+    while b_idx < ctx.batch_size {
+        for col in 0..q4_blocks_per_row {
+            let block_idx = row * q4_blocks_per_row + col;
+            let w_block = &(*(ctx.w_stream as *const crate::types::BlockQ4_0).add(block_idx));
+            
+            let q_vec = vld1q_u8(w_block.qs.as_ptr());
+            let q0_u8 = vandq_u8(q_vec, mask);
+            let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
+            let q1_u8 = vshrq_n_u8::<4>(q_vec);
+            let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
+            
+            let x_ptr = ctx.x_stream.add(b_idx * in_features + col * 32);
             let x_vecs = vld2q_s8(x_ptr);
             
             let mut acc = vdupq_n_s32(0);
@@ -242,10 +343,12 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
                 w1 = in(vreg) q1_s8,
             );
             
-            let block_sum = vaddvq_s32(acc);
-            row_sums[b] += (block_sum as f32) * f16_to_f32(w_block.d);
+            row_sums[b_idx] += (vaddvq_s32(acc) as f32) * f16_to_f32(w_block.d);
         }
-        
+        b_idx += 1;
+    }
+    
+    for b in 0..ctx.batch_size {
         *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums[b] * scale;
     }
 }

@@ -63,7 +63,6 @@ fn main() {
         num_rows,
         blocks_per_row,
         num_threads: 8,
-        state: vec101::types::EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
     };
 
     println!("Starting Decode (TPS) benchmark...");
@@ -89,7 +88,6 @@ fn main() {
         num_rows,
         blocks_per_row,
         num_threads: 8,
-        state: vec101::types::EngineState::Verifying { draft_tokens: [0; 8], draft_len: 0 },
     };
 
     // Warmup

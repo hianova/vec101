@@ -16,7 +16,6 @@ pub mod compute;
 pub mod memory_tracker;
 pub mod feeder;
 pub mod traits;
-pub mod engine;
 pub mod attention;
 pub mod ops;
 pub mod ffi;
