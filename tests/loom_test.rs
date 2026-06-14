@@ -17,15 +17,16 @@ fn test_vec101_loom_concurrency() {
         let mut out_buffer = vec![0.0f32; num_rows];
 
         let ctx = vec101_context {
+            quant_type: vec101::types::QuantType::Bit1_58,
             x_stream: x_stream.as_ptr(),
             s_stream: s_stream.as_ptr(),
-            w_stream: w_stream.as_ptr(),
+            w_stream: w_stream.as_ptr() as *const u8,
             out_buffer: out_buffer.as_mut_ptr(),
             num_rows,
             blocks_per_row,
             batch_size,
             num_threads,
-            state: EngineState::Drafting { target_tokens: 1 },
+            state: EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
         };
 
         unsafe {

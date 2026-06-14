@@ -54,7 +54,8 @@ fn main() {
     println!("Data generation complete.");
 
     let mut ctx_decode = vec101_context {
-        w_stream: w_stream.as_ptr(),
+        quant_type: vec101::types::QuantType::Bit1_58,
+        w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
         out_buffer: out_actual.as_mut_ptr(),
@@ -62,7 +63,7 @@ fn main() {
         num_rows,
         blocks_per_row,
         num_threads: 8,
-        state: vec101::types::EngineState::Drafting { target_tokens: 1 },
+        state: vec101::types::EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
     };
 
     println!("Starting Decode (TPS) benchmark...");
@@ -79,7 +80,8 @@ fn main() {
 
     println!("Starting Prefill (TTFT) benchmark for batch size {}...", max_batch_size);
     let mut ctx_prefill = vec101_context {
-        w_stream: w_stream.as_ptr(),
+        quant_type: vec101::types::QuantType::Bit1_58,
+        w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
         out_buffer: out_actual.as_mut_ptr(),
@@ -87,7 +89,7 @@ fn main() {
         num_rows,
         blocks_per_row,
         num_threads: 8,
-        state: vec101::types::EngineState::Verifying { draft_tokens: [0, 0, 0] },
+        state: vec101::types::EngineState::Verifying { draft_tokens: [0; 8], draft_len: 0 },
     };
 
     // Warmup

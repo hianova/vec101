@@ -40,13 +40,17 @@ impl Vec101Engine {
     pub fn generate_parallel(&mut self, prompts: &[String]) -> Vec<String> {
         let batch_size = prompts.len();
         
+        let mut out_buffer = vec![0.0f32; batch_size * 4096];
+        let mut x_stream = vec![0i8; batch_size * 16 * 2048];
+        let mut s_stream = vec![1.0f32; batch_size];
+        
         // 1. Prepare Batch Context
         let mut ctx = vec101_context {
             quant_type: crate::types::QuantType::Bit1_58, // Default, will update based on data
             w_stream: core::ptr::null(), // Will be linked to loader.model_weights.layers[..]
-            x_stream: core::ptr::null(),
-            s_stream: core::ptr::null(),
-            out_buffer: core::ptr::null_mut(),
+            x_stream: x_stream.as_ptr(),
+            s_stream: s_stream.as_ptr(),
+            out_buffer: out_buffer.as_mut_ptr(),
             batch_size,
             num_rows: 4096, // Example hidden dim
             blocks_per_row: 16,
@@ -69,19 +73,31 @@ impl Vec101Engine {
             // The zero-copy magic happens here: ctx.w_stream directly points to mmap'd physical memory!
         }
 
-        // 3. Execute Batch Inference (Mock token loop)
+        // 3. Execute Batch Inference
         unsafe {
-            // vec101_compute(&ctx);
+            if !ctx.w_stream.is_null() {
+                vec101_compute(&ctx);
+            }
         }
 
         // 4. Return results
         let mut results = Vec::with_capacity(batch_size);
         for (i, p) in prompts.iter().enumerate() {
-            results.push(format!("{}\n\n[vec101 Batch {} Generated Content utilizing Zero-Copy engine]", p, i));
+            let start = i * 4096;
+            let logits = &out_buffer[start..start + 4096];
+            // Since we don't have the full decoding pipeline here, we just use a sample token id.
+            // A true engine would append the decoded string.
+            let mut max_val = f32::NEG_INFINITY;
+            let mut max_idx = 0;
+            for (idx, &v) in logits.iter().enumerate() {
+                if v > max_val {
+                    max_val = v;
+                    max_idx = idx;
+                }
+            }
+            results.push(format!("{}\n\n[vec101 Batch {} Generated Content utilizing Zero-Copy engine. Max Logit Idx: {}]", p, i, max_idx));
         }
         
-        // Simulating the time taken for a batch inference
-        std::thread::sleep(std::time::Duration::from_millis(50));
         results
     }
 }
@@ -93,12 +109,16 @@ impl Vec101Engine {
     pub unsafe fn forward_draft(ctx: &mut vec101_context, target_tokens: usize) -> Vec<u32> {
         ctx.state = EngineState::Drafting { target_tokens, layer_skip_stride: 2 };
         
-        // Simulating skipped layer processing (MTP)
-        // In real execution, this would only execute vec101_compute on specific layer indices.
         vec101_compute(ctx);
         
-        // Mock returning N drafted tokens
-        alloc::vec![0; target_tokens]
+        let logits = core::slice::from_raw_parts(ctx.out_buffer, ctx.num_rows);
+        let mut drafted = alloc::vec::Vec::with_capacity(target_tokens);
+        
+        let (token, _) = Self::sample_with_telemetry(logits);
+        for _ in 0..target_tokens {
+            drafted.push(token); // For a real MTP it would decode multiple outputs, here we duplicate the single pass logit.
+        }
+        drafted
     }
 
     /// # Safety
@@ -116,8 +136,16 @@ impl Vec101Engine {
         
         vec101_compute(ctx);
         
-        // Simulation: Return true if all accepted.
-        true
+        let mut all_match = true;
+        for i in 0..len {
+            let logits = core::slice::from_raw_parts(ctx.out_buffer.add(i * ctx.num_rows), ctx.num_rows);
+            let (token, _) = Self::sample_with_telemetry(logits);
+            if token != draft_tokens[i] {
+                all_match = false;
+                break;
+            }
+        }
+        all_match
     }
 
     /// Sampling with Cognitive Telemetry.

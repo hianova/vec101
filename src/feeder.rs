@@ -33,8 +33,13 @@ pub fn memory_reorder(quantized_input: &[i8], i_stream: &[u32], block_size: usiz
     let total_elements = num_blocks * block_size;
     let mut x_stream = alloc::vec![0i8; total_elements];
     
-    for i in 0..total_elements {
-        x_stream[i] = quantized_input[i % quantized_input.len()];
+    for (b_idx, &i_val) in i_stream.iter().enumerate() {
+        let src_offset = (i_val as usize) * block_size;
+        let dst_offset = b_idx * block_size;
+        
+        for i in 0..block_size {
+            x_stream[dst_offset + i] = quantized_input[(src_offset + i) % quantized_input.len()];
+        }
     }
     x_stream
 }

@@ -124,7 +124,7 @@ unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
 }
 
 #[cfg(target_arch = "aarch64")]
-pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
+pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: &mut [f32]) {
     match ctx.quant_type {
         crate::types::QuantType::Bit1_58 => process_row_neon_gemm_bit1_58(row, ctx, row_sums),
         crate::types::QuantType::Q4_0 => process_row_neon_gemm_q4_0(row, ctx, row_sums),
@@ -132,30 +132,26 @@ pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: 
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
+unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_sums: &mut [f32]) {
     let scale = *ctx.s_stream.add(row);
     let in_features = ctx.blocks_per_row * 2048;
     
-    // We mock the execution structure to satisfy compilation and the new SuperBlock type.
-    // In a real implementation, we would decode the 8 blocks within the SuperBlock 
-    // and keep their scale factors ready to apply block by block.
-    // Here we implement the skeleton of the layout.
-    
-    let mut w_i8: alloc::vec::Vec<i8> = alloc::vec::Vec::with_capacity(in_features);
-    w_i8.set_len(in_features);
-    let mut micro_scales: alloc::vec::Vec<f32> = alloc::vec::Vec::with_capacity(ctx.blocks_per_row * 8);
-    
     let bit_mask_arr: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
     let bit_mask = vld1q_u8(bit_mask_arr.as_ptr());
+
+    for b in 0..ctx.batch_size {
+        row_sums[b] = 0.0;
+    }
 
     for col in 0..ctx.blocks_per_row {
         let block_idx = row * ctx.blocks_per_row + col;
         let w_super = &(*(ctx.w_stream as *const crate::types::Vec101SuperBlock).add(block_idx));
 
         for sub_blk in 0..8 {
-            micro_scales.push(f16_to_f32(w_super.scales[sub_blk]));
+            let micro_scale = f16_to_f32(w_super.scales[sub_blk]);
             let w_block = &w_super.blocks[sub_blk];
 
+            let mut w_micro = [0i8; 256];
             for sub in 0..8 {
                 let u64_idx = sub / 2;
                 let shift_amt = (sub % 2) * 32;
@@ -170,28 +166,19 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                 let w_vec_lo = vsubq_s8(mask_neg_lo, mask_pos_lo);
                 let w_vec_hi = vsubq_s8(mask_neg_hi, mask_pos_hi);
                 
-                let feature_offset = col * 2048 + sub_blk * 256 + sub * 32;
-                vst1q_s8(w_i8.as_mut_ptr().add(feature_offset), w_vec_lo);
-                vst1q_s8(w_i8.as_mut_ptr().add(feature_offset + 16), w_vec_hi);
+                let offset = sub * 32;
+                vst1q_s8(w_micro.as_mut_ptr().add(offset), w_vec_lo);
+                vst1q_s8(w_micro.as_mut_ptr().add(offset + 16), w_vec_hi);
             }
-        }
-    }
 
-    let mut row_sums_f32 = alloc::vec![0.0f32; ctx.batch_size];
-    
-    for b in 0..ctx.batch_size {
-        let x_batch_ptr = ctx.x_stream.add(b * in_features);
-        let w_ptr = w_i8.as_ptr();
-
-        for col in 0..ctx.blocks_per_row {
-            for sub_blk in 0..8 {
+            for b in 0..ctx.batch_size {
+                let x_batch_ptr = ctx.x_stream.add(b * in_features);
                 let mut acc = vdupq_n_s32(0);
-                let micro_scale = micro_scales[col * 8 + sub_blk];
-                
+
                 for chunk in 0..16 { // 16 chunks of 16 bytes = 256 bytes per micro block
                     let offset = col * 2048 + sub_blk * 256 + chunk * 16;
                     let x_val = vld1q_s8(x_batch_ptr.add(offset));
-                    let w_val = vld1q_s8(w_ptr.add(offset));
+                    let w_val = vld1q_s8(w_micro.as_ptr().add(chunk * 16));
 
                     core::arch::asm!(
                         "sdot {acc:v}.4s, {x:v}.16b, {w:v}.16b",
@@ -200,22 +187,25 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                         w = in(vreg) w_val,
                     );
                 }
-                
+
                 let sum = vaddvq_s32(acc);
-                row_sums_f32[b] += (sum as f32) * micro_scale;
+                row_sums[b] += (sum as f32) * micro_scale;
             }
         }
     }
 
     for b in 0..ctx.batch_size {
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums_f32[b] * scale;
+        *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums[b] * scale;
     }
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
+unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums: &mut [f32]) {
     let scale = *ctx.s_stream.add(row);
-    let mut row_sums_f32 = alloc::vec![0.0f32; ctx.batch_size];
+    
+    for b in 0..ctx.batch_size {
+        row_sums[b] = 0.0;
+    }
     
     let q4_blocks_per_row = ctx.blocks_per_row * 8;
     let in_features = q4_blocks_per_row * 32;
@@ -253,9 +243,9 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
             );
             
             let block_sum = vaddvq_s32(acc);
-            row_sums_f32[b] += (block_sum as f32) * f16_to_f32(w_block.d);
+            row_sums[b] += (block_sum as f32) * f16_to_f32(w_block.d);
         }
         
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums_f32[b] * scale;
+        *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums[b] * scale;
     }
 }

@@ -81,7 +81,7 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
 
                 let handle = std::thread::spawn(move || {
                     let ctx_ref = unsafe { &*(ctx_ptr as *const vec101_context) };
-                    let mut row_sums = alloc::vec![0i32; batch_size];
+                    let mut row_sums = alloc::vec![0.0f32; batch_size];
 
                     for row in start_row..end_row {
                         neon::process_row_neon_gemm(row, ctx_ref, &mut row_sums);
@@ -101,7 +101,18 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
         return;
     }
     
-    let x_t: alloc::vec::Vec<i8> = alloc::vec::Vec::new();
+    let x_t = if is_gemm {
+        let mut t = vec![0i8; in_features * padded_batch];
+        let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * in_features) };
+        for b in 0..ctx.batch_size {
+            for f in 0..in_features {
+                t[f * padded_batch + b] = x_slice[b * in_features + f];
+            }
+        }
+        t
+    } else {
+        vec![]
+    };
     let x_t_arc = Arc::new(x_t);
 
     if num_threads == 1 {

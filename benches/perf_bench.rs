@@ -96,7 +96,8 @@ fn bench_vec101(c: &mut Criterion) {
     let mut out_actual = vec![0f32; batch_size * num_rows];
 
     let ctx = vec101_context {
-        w_stream: w_stream.as_ptr(),
+        quant_type: vec101::types::QuantType::Bit1_58,
+        w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
         out_buffer: out_actual.as_mut_ptr(),
@@ -104,7 +105,7 @@ fn bench_vec101(c: &mut Criterion) {
         num_rows,
         blocks_per_row,
         num_threads: 1, // Measure single-thread CPU core logic time for micro-bench
-        state: EngineState::Drafting { target_tokens: 1 },
+        state: EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
     };
 
     let mut group = c.benchmark_group("Compute Comparison (Batch=1)");

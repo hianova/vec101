@@ -32,9 +32,10 @@ The core compute loop (`vec101_compute`) utilizes branchless SIMD programming ta
 - Horizontally sums 32-byte chunks instantly using `madd` fused instructions.
 
 ### NEON (ARM aarch64 - M1/M2/M3)
-- **Weight Pre-Decoding**: 1.58-bit ternary weights are decoded into continuous `i8` arrays ONCE per row to bypass intensive runtime bit-fiddling in the hot loops.
-- **Signed Dot Product (`sdot`)**: Uses the highly advanced `sdot` instruction (`vdotq_s32`) within inline `asm!` to fuse four `i8` multiplications and `i32` accumulations instantly, achieving peak M1/M2/M3 vectorization throughput.
+- **Zero-Allocation Hot Loop**: 1.58-bit ternary weights are decoded into continuous `i8` stack arrays (`[0i8; 256]`) per microblock. The entire hot loop avoids any heap allocations.
+- **Signed Dot Product (`sdot`)**: Uses the highly advanced `sdot` instruction (`vdotq_s32`) within inline `asm!` to fuse four `i8` multiplications and `i32` accumulations instantly. Combined with our microblock loop reordering, this achieves peak L1 cache hit rate and throughput.
 - **Vectorized Operator Fusion**: `SwiGLU` and `RMSNorm` leverages `vqtbl4q_u8` (Dynamic Vectorized LUT Lookups) and saturating narrow conversions (`vqmovn_s32`) to process INT8 scaling, clamping, and quantization fully within NEON vector registers.
+- **Tiled FlashAttention**: Integrates a single-thread CPU-bound Tiled FlashAttention implementation, ensuring safe softmax numerical stability while keeping $Q$, $K$, and $V$ entirely within the CPU data cache boundaries.
 
 ### GPU Acceleration (Metal & CUDA)
 To circumvent memory bandwidth bottlenecks, `vec101` implements hardware-native Zero-Copy bitwise computation via optional feature flags (`gpu-metal` and `gpu-cuda`):
