@@ -61,45 +61,7 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
     let in_features = ctx.blocks_per_row * 2048; // 8 * 256
     let padded_batch = (ctx.batch_size + 63) & !63; // Pad to 64 for unrolled registers
     
-    #[cfg(target_arch = "aarch64")]
-    {
-        if ctx.batch_size > 1 {
-            let num_threads = core::cmp::min(ctx.batch_size, 16);
-            let chunk_size = ctx.num_rows.div_ceil(num_threads);
-            let mut threads = alloc::vec::Vec::with_capacity(num_threads);
 
-            for t_idx in 0..num_threads {
-                let start_row = t_idx * chunk_size;
-                let end_row = core::cmp::min(start_row + chunk_size, ctx.num_rows);
-
-                if start_row >= end_row {
-                    break;
-                }
-
-                let ctx_ptr = ctx as *const vec101_context as usize;
-                let batch_size = ctx.batch_size;
-
-                let handle = std::thread::spawn(move || {
-                    let ctx_ref = unsafe { &*(ctx_ptr as *const vec101_context) };
-                    let mut row_sums = alloc::vec![0.0f32; batch_size];
-
-                    for row in start_row..end_row {
-                        neon::process_row_neon_gemm(row, ctx_ref, &mut row_sums);
-                    }
-                });
-                threads.push(handle);
-            }
-
-            for handle in threads {
-                let _ = handle.join();
-            }
-        } else {
-            for row in 0..ctx.num_rows {
-                neon::process_row_neon_gemv(row, ctx);
-            }
-        }
-        return;
-    }
     
     let x_t = if is_gemm {
         let mut t = vec![0i8; in_features * padded_batch];
@@ -116,16 +78,24 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
     let x_t_arc = Arc::new(x_t);
 
     if num_threads == 1 {
+        #[cfg(target_arch = "aarch64")]
+        let mut row_sums_f32 = vec![0.0f32; padded_batch];
+        #[cfg(not(target_arch = "aarch64"))]
         let mut row_sums = vec![0i32; padded_batch];
+        
         for row in 0..ctx.num_rows {
             if is_gemm {
                 #[cfg(target_arch = "x86_64")]
                 avx2::process_row_avx2_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums);
+                #[cfg(target_arch = "aarch64")]
+                neon::process_row_neon_gemm(row, ctx, &mut row_sums_f32);
                 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                 scalar::process_row_scalar_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums);
             } else {
                 #[cfg(target_arch = "x86_64")]
                 avx2::process_row_avx2_gemv(row, ctx);
+                #[cfg(target_arch = "aarch64")]
+                neon::process_row_neon_gemv(row, ctx);
                 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                 scalar::process_row_scalar_gemv(row, ctx);
             }
@@ -152,16 +122,24 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
             spawn_thread(move || {
                 let ctx_ref = unsafe { &*(ctx_addr as *const vec101_context) };
                 if start_row < end_row {
+                    #[cfg(target_arch = "aarch64")]
+                    let mut row_sums_f32 = vec![0.0f32; padded_batch];
+                    #[cfg(not(target_arch = "aarch64"))]
                     let mut row_sums = vec![0i32; padded_batch];
+                    
                     for row in start_row..end_row {
                         if is_gemm {
                             #[cfg(target_arch = "x86_64")]
                             avx2::process_row_avx2_gemm(row, ctx_ref, &x_t_clone, padded_batch, &mut row_sums);
+                            #[cfg(target_arch = "aarch64")]
+                            neon::process_row_neon_gemm(row, ctx_ref, &mut row_sums_f32);
                             #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                             scalar::process_row_scalar_gemm(row, ctx_ref, &x_t_clone, padded_batch, &mut row_sums);
                         } else {
                             #[cfg(target_arch = "x86_64")]
                             avx2::process_row_avx2_gemv(row, ctx_ref);
+                            #[cfg(target_arch = "aarch64")]
+                            neon::process_row_neon_gemv(row, ctx_ref);
                             #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                             scalar::process_row_scalar_gemv(row, ctx_ref);
                         }
@@ -174,16 +152,24 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
         {
             let ctx_ref = unsafe { &*(ctx_addr as *const vec101_context) };
             if start_row < end_row {
+                #[cfg(target_arch = "aarch64")]
+                let mut row_sums_f32 = vec![0.0f32; padded_batch];
+                #[cfg(not(target_arch = "aarch64"))]
                 let mut row_sums = vec![0i32; padded_batch];
+                
                 for row in start_row..end_row {
                     if is_gemm {
                         #[cfg(target_arch = "x86_64")]
                         process_row_avx2_gemm(row, ctx_ref, &x_t_clone, padded_batch, &mut row_sums);
+                        #[cfg(target_arch = "aarch64")]
+                        process_row_neon_gemm(row, ctx_ref, &mut row_sums_f32);
                         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                         process_row_scalar_gemm(row, ctx_ref, &x_t_clone, padded_batch, &mut row_sums);
                     } else {
                         #[cfg(target_arch = "x86_64")]
                         process_row_avx2_gemv(row, ctx_ref);
+                        #[cfg(target_arch = "aarch64")]
+                        process_row_neon_gemv(row, ctx_ref);
                         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                         process_row_scalar_gemv(row, ctx_ref);
                     }

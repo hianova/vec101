@@ -15,7 +15,7 @@ A highly optimized, `no_std`, `no_alloc` library for computing 1.58-bit (ternary
 
 By transforming matrix multiplication into a flattened continuous dual-rail bitmask processor, `vec101` significantly reduces `L1-dcache-misses` and completely avoids scalar branching.
 
-- Native Apple Silicon M1 (CPU NEON): **~5.14 tok/s** end-to-end decoding rate for a 3B Parameter Model.
+- Native Apple Silicon M1 (CPU NEON): **~20.24 tok/s** end-to-end decoding rate for a 3B Parameter Model.
 - Micro-benchmark (1.28M ternary accumulations): **~135.28 µs** on CPU SIMD vs. **1.87 ms** scalar baseline (13.8x Speedup).
 
 ### Running Benchmarks
