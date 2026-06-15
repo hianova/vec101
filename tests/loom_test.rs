@@ -1,6 +1,6 @@
 #![allow(unused)]
 use vec101::{vec101_compute, vec101_context, vec101_block};
-use vec101::types::{Vec101SuperBlock, EngineState};
+use vec101::types::Vec101SuperBlock;
 
 #[cfg(loom)]
 #[test]
@@ -26,7 +26,9 @@ fn test_vec101_loom_concurrency() {
             blocks_per_row,
             batch_size,
             num_threads,
-            state: EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
+            block_size: 16,
+            kv_blocks: std::ptr::null(),
+            num_blocks: 0,
         };
 
         unsafe {

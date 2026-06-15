@@ -42,9 +42,7 @@ pub fn f32_to_f16(f: f32) -> f16 {
 
 /// The fundamental compute block for vec101.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-#[archive_attr(repr(C))]
+#[derive(Debug, Clone, Copy)]
 pub struct vec101_block {
     pub w_pos_bits: [u64; 4],
     pub w_neg_bits: [u64; 4],
@@ -52,9 +50,7 @@ pub struct vec101_block {
 
 /// 完美對齊 64-Byte，且維持 256 維度的終極設計！
 #[repr(C)]
-#[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-#[archive_attr(repr(C))]
+#[derive(Debug, Clone, Copy)]
 pub struct Vec101SuperBlock {
     // 第 1 個 Cache Line (64 Bytes)：專門放 Metadata
     // 支援 8 個 Block 的 Scale 和 Offset
@@ -66,10 +62,8 @@ pub struct Vec101SuperBlock {
 }
 
 /// Gemma Q4_0 Block (32 weights packed into 16 bytes + 1 f16 scale = 18 bytes)
-#[repr(C)]
-#[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-#[archive_attr(repr(C))]
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub struct BlockQ4_0 {
     pub d: f16,           // Block Scale (Delta)
     pub qs: [u8; 16],     // 32 個 4-bit 權重打包
@@ -78,33 +72,10 @@ pub struct BlockQ4_0 {
 
 
 /// Supported quantization types for Dual Engine
-#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuantType {
     Bit1_58,
     Q4_0,
-}
-
-#[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-pub enum LayerData {
-    Bit1_58(alloc::vec::Vec<Vec101SuperBlock>),
-    Q4_0(alloc::vec::Vec<BlockQ4_0>),
-}
-
-/// A complete layer containing all its pre-aligned SuperBlocks
-#[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-pub struct LayerWeights {
-    pub name: String,
-    pub data: LayerData,
-}
-
-/// The root model file containing all layers
-#[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[archive(check_bytes)]
-pub struct ModelWeights {
-    pub layers: alloc::vec::Vec<LayerWeights>,
 }
 
 /// The runtime context for the vec101 engine.

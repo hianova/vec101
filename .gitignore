@@ -2,6 +2,7 @@
 venv/
 .DS_Store
 *.safetensors
+*.rkyv
 TODO.md
 /tools/bitnet_b1_58-large/
 /tools/venv/

@@ -1,5 +1,5 @@
 use vec101::{vec101_block, vec101_compute, vec101_context};
-use vec101::types::{Vec101SuperBlock, EngineState};
+use vec101::types::Vec101SuperBlock;
 
 mod common;
 use common::{XorShift32, naive_fp32_compute};
@@ -74,7 +74,9 @@ fn test_vec101_correctness() {
         num_rows,
         blocks_per_row,
         num_threads: 4,
-        state: EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
+        block_size: 16,
+        kv_blocks: std::ptr::null(),
+        num_blocks: 0,
     };
 
     unsafe {
