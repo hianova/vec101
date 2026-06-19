@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use vec101::{vec101_block, vec101_compute, vec101_context};
-use vec101::types::{Vec101SuperBlock, f16_to_f32, EngineState};
+use vec101::types::{Vec101SuperBlock, f16_to_f32};
 
 struct XorShift32(u32);
 impl XorShift32 {
@@ -101,11 +101,13 @@ fn bench_vec101(c: &mut Criterion) {
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
         out_buffer: out_actual.as_mut_ptr(),
+        kv_blocks: core::ptr::null(),
+        num_blocks: 0,
+        block_size: 0,
         batch_size,
         num_rows,
         blocks_per_row,
         num_threads: 1, // Measure single-thread CPU core logic time for micro-bench
-        state: EngineState::Drafting { target_tokens: 1, layer_skip_stride: 1 },
     };
 
     let mut group = c.benchmark_group("Compute Comparison (Batch=1)");

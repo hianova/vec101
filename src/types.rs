@@ -105,7 +105,61 @@ pub struct vec101_context {
     pub blocks_per_row: usize,
     /// Number of parallel threads to use
     pub num_threads: usize,
+    /// Tree mask for speculative decoding (1D array of parent indices)
+    pub tree_mask: *const u32,
+    /// Number of nodes in the speculative decoding tree
+    pub tree_size: usize,
 }
 
 unsafe impl Send for vec101_context {}
 unsafe impl Sync for vec101_context {}
+
+/// A simple lock-free mailbox using AtomicU64 for auto-fill speculative states.
+pub struct LockFreeMailbox {
+    state: core::sync::atomic::AtomicU64,
+}
+
+impl Default for LockFreeMailbox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LockFreeMailbox {
+    pub const fn new() -> Self {
+        Self {
+            state: core::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Try to push speculative data. Fails if already full.
+    pub fn try_push(&self, data: u32) -> Result<(), u32> {
+        let current = self.state.load(core::sync::atomic::Ordering::Acquire);
+        if current != 0 {
+            return Err(data);
+        }
+        self.state.store(data as u64, core::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    /// Try to pop speculative data. Returns None if empty.
+    pub fn try_pop(&self) -> Option<u32> {
+        let current = self.state.swap(0, core::sync::atomic::Ordering::Acquire);
+        if current == 0 {
+            None
+        } else {
+            Some(current as u32)
+        }
+    }
+}
+
+/// The Heterogeneous Compute Hub interface (Dual Engine)
+pub struct DualEngineContext<'a> {
+    /// 1. 唯一的一份物理記憶體映射 (Zero-copy)
+    pub shared_kv_cache: &'a mut [u8], 
+    pub shared_weights_1_58b: &'a [u8],
+    pub shared_weights_4b: &'a [u8],
+
+    /// 2. 你發明的無鎖信箱 (Lock-free Mailbox)
+    pub auto_fill_mailbox: LockFreeMailbox,
+}

@@ -2,25 +2,9 @@ use crate::types::vec101_context;
 extern crate alloc;
 use alloc::vec;
 
-#[cfg(not(loom))]
-use alloc::sync::Arc;
-#[cfg(loom)]
-use loom::sync::Arc;
-
-#[cfg(not(loom))]
-use core::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(loom)]
-use loom::sync::atomic::{AtomicUsize, Ordering};
-
-#[cfg(not(loom))]
-use core::hint::spin_loop;
-#[cfg(loom)]
-use loom::hint::spin_loop;
-
-#[cfg(all(feature = "std", not(loom)))]
-use std::thread::spawn as spawn_thread;
-#[cfg(loom)]
-use loom::thread::spawn as spawn_thread;
+use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
+#[cfg(any(feature = "std", loom))]
+use crate::sync::spawn_thread;
 
 pub mod avx2;
 pub mod neon;
@@ -50,14 +34,18 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
             let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
             metal_backend::metal_compute(ctx, &x_blocks, x_scale);
             return;
-        } else {
-            panic!("Metal backend for Q4_0 is not yet implemented in this dual-engine layout.");
+        } else if ctx.quant_type == crate::types::QuantType::Q4_0 {
+            metal_backend::metal_compute_q4_0(ctx);
+            return;
         }
     }
 
     let is_gemm = ctx.batch_size > 1;
 
-    let in_features = ctx.blocks_per_row * 2048; // 8 * 256
+    let in_features = match ctx.quant_type {
+        crate::types::QuantType::Bit1_58 => ctx.blocks_per_row * 2048,
+        crate::types::QuantType::Q4_0 => ctx.blocks_per_row * 256,
+    };
     let padded_batch = (ctx.batch_size + 63) & !63; // Pad to 64 for unrolled registers
     
     #[cfg(not(target_arch = "aarch64"))]
@@ -81,8 +69,64 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
     let mut row_sums_f32 = vec![0.0f32; padded_batch];
     #[cfg(not(target_arch = "aarch64"))]
     let mut row_sums = vec![0i32; padded_batch];
-    
-    for row in 0..ctx.num_rows {
+    let num_threads = if ctx.num_threads == 0 { 1 } else { ctx.num_threads };
+    let row_counter = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let ctx_ptr = ctx as *const vec101_context as usize;
+
+    #[cfg(any(feature = "std", loom))]
+    let use_threads = num_threads > 1;
+    #[cfg(not(any(feature = "std", loom)))]
+    let use_threads = false;
+
+    if use_threads {
+        #[cfg(any(feature = "std", loom))]
+        for _ in 0..(num_threads - 1) {
+            let rc = Arc::clone(&row_counter);
+            let comp = Arc::clone(&completed);
+            #[cfg(not(target_arch = "aarch64"))]
+            let x_t_clone = Arc::clone(&x_t_arc);
+            
+            spawn_thread(move || {
+                let thread_ctx = unsafe { &*(ctx_ptr as *const vec101_context) };
+                
+                #[cfg(target_arch = "aarch64")]
+                let mut row_sums_f32 = vec![0.0f32; padded_batch];
+                #[cfg(not(target_arch = "aarch64"))]
+                let mut row_sums = vec![0i32; padded_batch];
+                
+                loop {
+                    let row = rc.fetch_add(1, Ordering::Relaxed);
+                    if row >= thread_ctx.num_rows {
+                        break;
+                    }
+                    if is_gemm {
+                        #[cfg(target_arch = "x86_64")]
+                        unsafe { avx2::process_row_avx2_gemm(row, thread_ctx, &x_t_clone, padded_batch, &mut row_sums) };
+                        #[cfg(target_arch = "aarch64")]
+                        unsafe { neon::process_row_neon_gemm(row, thread_ctx, &mut row_sums_f32) };
+                        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+                        unsafe { scalar::process_row_scalar_gemm(row, thread_ctx, &x_t_clone, padded_batch, &mut row_sums) };
+                    } else {
+                        #[cfg(target_arch = "x86_64")]
+                        unsafe { avx2::process_row_avx2_gemv(row, thread_ctx) };
+                        #[cfg(target_arch = "aarch64")]
+                        unsafe { neon::process_row_neon_gemv(row, thread_ctx) };
+                        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+                        unsafe { scalar::process_row_scalar_gemv(row, thread_ctx) };
+                    }
+                }
+                comp.fetch_add(1, Ordering::Release);
+            });
+        }
+    }
+
+    // Main thread execution
+    loop {
+        let row = row_counter.fetch_add(1, Ordering::Relaxed);
+        if row >= ctx.num_rows {
+            break;
+        }
         if is_gemm {
             #[cfg(target_arch = "x86_64")]
             avx2::process_row_avx2_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums);
@@ -97,6 +141,12 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
             neon::process_row_neon_gemv(row, ctx);
             #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
             scalar::process_row_scalar_gemv(row, ctx);
+        }
+    }
+
+    if use_threads {
+        while completed.load(Ordering::Acquire) < num_threads - 1 {
+            spin_loop();
         }
     }
 }

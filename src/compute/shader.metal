@@ -55,3 +55,50 @@ kernel void vec101_gemv(
     float scale = s_stream[row];
     out_buffer[batch * num_rows + row] = row_sum * scale * x_scale;
 }
+
+struct BlockQ4_0 {
+    half d;
+    uchar qs[16];
+};
+
+kernel void vec101_gemv_q4_0(
+    device const BlockQ4_0* w_stream [[buffer(0)]],
+    device const char* x_stream [[buffer(1)]],
+    device const float* s_stream [[buffer(2)]],
+    device float* out_buffer [[buffer(3)]],
+    constant uint& blocks_per_row [[buffer(4)]],
+    constant float& x_scale [[buffer(5)]],
+    constant uint& num_rows [[buffer(6)]],
+    uint2 pos [[thread_position_in_grid]]
+) {
+    uint row = pos.x;
+    uint batch = pos.y;
+    
+    uint q4_blocks_per_row = blocks_per_row * 8;
+    
+    device const BlockQ4_0* row_w_stream = w_stream + (row * q4_blocks_per_row);
+    device const char* batch_x_stream = x_stream + (batch * q4_blocks_per_row * 32);
+    
+    float row_sum = 0.0f;
+    
+    for (uint col = 0; col < q4_blocks_per_row; col++) {
+        BlockQ4_0 w_block = row_w_stream[col];
+        float micro_scale = (float)w_block.d;
+        
+        device const char* x_ptr = batch_x_stream + (col * 32);
+        
+        int block_sum = 0;
+        for (uint i = 0; i < 16; i++) {
+            uchar q = w_block.qs[i];
+            int q0 = (int)(q & 0x0F) - 8;
+            int q1 = (int)(q >> 4) - 8;
+            
+            block_sum += q0 * (int)x_ptr[i * 2];
+            block_sum += q1 * (int)x_ptr[i * 2 + 1];
+        }
+        row_sum += (float)block_sum * micro_scale;
+    }
+    
+    float scale = s_stream[row];
+    out_buffer[batch * num_rows + row] += row_sum * scale; // Note: cpu backend does += 
+}

@@ -11,19 +11,20 @@
 
 extern crate alloc;
 
+pub mod sync;
 pub mod types;
 pub mod compute;
-pub mod memory_tracker;
+pub mod components;
 pub mod feeder;
-pub mod traits;
-pub mod attention;
 pub mod ops;
 pub mod ffi;
-pub mod tokenizer;
+
+pub use components::{memory_tracker, attention, tokenizer};
 
 
 pub use compute::vec101_compute;
-pub use memory_tracker::{check_memory_leaks, check_thread_drops, ScopedResource};
+pub use components::memory_tracker::{check_memory_leaks, check_thread_drops, ScopedResource};
 pub use types::{vec101_block, vec101_context};
+pub use ffi::vec101_compute_c;
 
 

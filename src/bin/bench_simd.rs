@@ -1,12 +1,7 @@
 use std::time::Instant;
 
-// 模擬 Q4_0 的資料結構
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct BlockQ4_0 {
-    pub d: f32, // 簡化為 f32 方便測試
-    pub qs: [u8; 16],
-}
+use vec101::types::BlockQ4_0;
+use vec101::types::f16_to_f32;
 
 fn scalar_q4_0(w_block: &BlockQ4_0, x_stream: &[i8]) -> f32 {
     let mut block_sum = 0;
@@ -22,7 +17,7 @@ fn scalar_q4_0(w_block: &BlockQ4_0, x_stream: &[i8]) -> f32 {
         x_idx += 2;
     }
     
-    (block_sum as f32) * w_block.d
+    (block_sum as f32) * f16_to_f32(w_block.d)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -30,37 +25,39 @@ use std::arch::aarch64::*;
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn neon_q4_0(w_block: &BlockQ4_0, x_stream: &[i8]) -> f32 {
-    let q_vec = vld1q_u8(w_block.qs.as_ptr());
-    let mask = vdupq_n_u8(0x0F);
-    let eight = vdupq_n_u8(8);
-    
-    let q0_u8 = vandq_u8(q_vec, mask);
-    let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
-    
-    let q1_u8 = vshrq_n_u8::<4>(q_vec);
-    let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
-    
-    let x_vecs = vld2q_s8(x_stream.as_ptr());
-    
-    let mut acc = vdupq_n_s32(0);
-    core::arch::asm!(
-        "sdot {acc:v}.4s, {x0:v}.16b, {w0:v}.16b",
-        "sdot {acc:v}.4s, {x1:v}.16b, {w1:v}.16b",
-        acc = inout(vreg) acc,
-        x0 = in(vreg) x_vecs.0,
-        w0 = in(vreg) q0_s8,
-        x1 = in(vreg) x_vecs.1,
-        w1 = in(vreg) q1_s8,
-    );
-    
-    let block_sum = vaddvq_s32(acc);
-    (block_sum as f32) * w_block.d
+    unsafe {
+        let q_vec = vld1q_u8(w_block.qs.as_ptr());
+        let mask = vdupq_n_u8(0x0F);
+        let eight = vdupq_n_u8(8);
+        
+        let q0_u8 = vandq_u8(q_vec, mask);
+        let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
+        
+        let q1_u8 = vshrq_n_u8::<4>(q_vec);
+        let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
+        
+        let x_vecs = vld2q_s8(x_stream.as_ptr());
+        
+        let mut acc = vdupq_n_s32(0);
+        core::arch::asm!(
+            "sdot {acc:v}.4s, {x0:v}.16b, {w0:v}.16b",
+            "sdot {acc:v}.4s, {x1:v}.16b, {w1:v}.16b",
+            acc = inout(vreg) acc,
+            x0 = in(vreg) x_vecs.0,
+            w0 = in(vreg) q0_s8,
+            x1 = in(vreg) x_vecs.1,
+            w1 = in(vreg) q1_s8,
+        );
+        
+        let block_sum = vaddvq_s32(acc);
+        (block_sum as f32) * f16_to_f32(w_block.d)
+    }
 }
 
 fn main() {
     let block = BlockQ4_0 {
-        d: 0.5,
-        qs: [0x5A; 16], // 隨便塞點權重
+        d: vec101::types::f32_to_f16(0.5),
+        qs: [0x5A; 16],
     };
     
     let mut x_stream = vec![0i8; 32];

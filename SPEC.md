@@ -54,6 +54,7 @@ All linear layer outputs are intercepted before generating `Vec<f32>` arrays. `R
 In contrast to standard engines that rely heavily on `std::sync` primitives or heavy libraries like `rayon`, `vec101` implements a custom row-chunking executor that relies solely on `core::sync::atomic::AtomicUsize`.
 - **Zero-Lock Synchronization**: Threads synchronize execution completion purely via atomic spin-latches (`fetch_sub`), minimizing context switch latency.
 - **Pointer Security**: The computation context (`vec101_context`) safely traverses threads via raw `usize` address boundaries, preventing `*const T` struct locking behaviors.
+- **Three-File Sync Abstraction**: To maintain a pure `no_std` core without cluttering the business logic with `#[cfg]` macros, the engine routes synchronization primitives via `src/sync/mod.rs` into three platform-specific implementations: `loom_impl.rs` (for concurrent verification), `std_impl.rs` (for standard environments), and `no_std.rs` (for bare-metal execution).
 - **Dual Compatibility**: Through the `std` feature flag, `vec101` falls back seamlessly between concurrent thread spawning (`std::thread::spawn`) and sequential execution for highly restrictive bare-metal hardware.
 
 ## Serialization Format

@@ -10,7 +10,10 @@ pub fn rmsnorm(x: &mut [f32], weight: &[f32], eps: f32) {
             sum_sq += v * v;
         }
         let mean_sq = sum_sq / hidden_dim as f32;
+        #[cfg(not(miri))]
         let inv_rms = 1.0 / libm::sqrtf(mean_sq + eps);
+        #[cfg(miri)]
+        let inv_rms = 1.0 / (mean_sq + eps).sqrt();
 
         for i in 0..hidden_dim {
             chunk[i] = chunk[i] * inv_rms * weight[i];
@@ -95,7 +98,10 @@ pub fn attention(
 ) {
     let hidden_dim = num_heads * head_dim;
     let num_tokens = q.len() / hidden_dim;
+    #[cfg(not(miri))]
     let scale = 1.0 / libm::sqrtf(head_dim as f32);
+    #[cfg(miri)]
+    let scale = 1.0 / (head_dim as f32).sqrt();
 
     for t in 0..num_tokens {
         let q_token = &q[t * hidden_dim..(t + 1) * hidden_dim];
@@ -180,7 +186,10 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: f32, eps: f32, out
         
         // Float scalar ops (O(1) per token, entirely negligible)
         let mean_sq = (sum_sq as f32) / (hidden_dim as f32);
+        #[cfg(not(miri))]
         let inv_rms = 1.0 / libm::sqrtf(mean_sq + eps);
+        #[cfg(miri)]
+        let inv_rms = 1.0 / (mean_sq + eps).sqrt();
         let combined_scale = inv_rms * weight_scale;
 
         // Pass 2: Find max_abs of (x_i8 * weight_i8)
