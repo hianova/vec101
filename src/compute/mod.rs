@@ -44,7 +44,7 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
 
     let in_features = match ctx.quant_type {
         crate::types::QuantType::Bit1_58 => ctx.blocks_per_row * 2048,
-        crate::types::QuantType::Q4_0 => ctx.blocks_per_row * 256,
+        crate::types::QuantType::Q4_0 => ctx.blocks_per_row * 2048,
     };
     let padded_batch = (ctx.batch_size + 63) & !63; // Pad to 64 for unrolled registers
     

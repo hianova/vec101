@@ -51,60 +51,101 @@ pub mod memory_tracker {
 
 pub mod attention {
     use alloc::vec::Vec;
+    use crate::math_int::{exp_approx_q16, FIXED_POINT_SHIFT};
+    #[cfg(target_arch = "aarch64")]
+    use core::arch::aarch64::*;
+    use rayon::prelude::*;
 
-    /// CPU-bound Tiled FlashAttention (FP32 Base)
-    /// To prevent L1 Cache misses, Q, K, V are tiled into small cache-aligned blocks.
-    pub struct CpuTiledAttention;
+    /// CPU-bound Tiled FlashAttention (Zero-Float Base)
+    /// Computes attention purely with integers, completely bypassing the FPU.
+    pub struct IntegerTiledAttention;
 
-    impl CpuTiledAttention {
-        /// Executes a CPU-optimized Tiled Attention loop in FP32.
-        /// This bypasses integer approximations for Softmax.
-        pub fn compute_attention_f32(q: &[f32], k: &[f32], v: &[f32], seq_len: usize, head_dim: usize, tile_size: usize) -> Vec<f32> {
-            let mut output = alloc::vec![0.0f32; seq_len * head_dim];
-            let mut m = alloc::vec![f32::NEG_INFINITY; seq_len];
-            let mut l = alloc::vec![0.0f32; seq_len];
-            let scale = 1.0 / libm::sqrtf(head_dim as f32);
-
-            let num_tiles = seq_len.div_ceil(tile_size);
+    impl IntegerTiledAttention {
+        /// Executes a CPU-optimized Tiled Attention loop purely in i8/i32.
+        /// Removes libm, floating point softmax, and floating point scaling.
+        /// Parallelized over Query tiles with Rayon, and SIMD optimized via NEON.
+        pub fn compute_attention_i8(q: &[i8], k: &[i8], v: &[i8], seq_len: usize, head_dim: usize, tile_size: usize) -> Vec<i8> {
+            let mut output = alloc::vec![0i8; seq_len * head_dim];
             
-            let mut s_ij = alloc::vec![0.0f32; tile_size * tile_size];
-            let mut p_ij = alloc::vec![0.0f32; tile_size];
-
-            for t_q in 0..num_tiles {
+            // We can process each tile of Q independently and in parallel!
+            // Each tile of Q produces `tile_size * head_dim` output bytes.
+            output.par_chunks_mut(tile_size * head_dim).enumerate().for_each(|(t_q, out_tile)| {
                 let q_start = t_q * tile_size;
                 let q_end = core::cmp::min(q_start + tile_size, seq_len);
                 let q_len = q_end - q_start;
+                
+                let mut m = alloc::vec![-999999i32; q_len]; 
+                let mut l = alloc::vec![0i32; q_len];
+                let mut s_ij = alloc::vec![0i32; q_len * tile_size]; // size depends on inner k_len
+                let mut p_ij = alloc::vec![0i32; tile_size];
 
-                for t_k in 0..num_tiles {
+                let num_tiles_k = seq_len.div_ceil(tile_size);
+
+                for t_k in 0..num_tiles_k {
                     let k_start = t_k * tile_size;
                     let k_end = core::cmp::min(k_start + tile_size, seq_len);
                     let k_len = k_end - k_start;
 
-                    // 1. Q * K^T (Local Tile)
+                    // 1. Q * K^T (Local Tile - Pure Integer MAC)
                     for i in 0..q_len {
                         let global_i = q_start + i;
                         let q_row = &q[global_i * head_dim .. (global_i + 1) * head_dim];
                         for j in 0..k_len {
                             let global_j = k_start + j;
-                            // Causal mask: query cannot attend to future keys
                             if global_i < global_j {
-                                s_ij[i * k_len + j] = f32::NEG_INFINITY;
+                                s_ij[i * k_len + j] = -999999;
                                 continue;
                             }
                             let k_row = &k[global_j * head_dim .. (global_j + 1) * head_dim];
-                            let mut dot = 0.0;
-                            for d in 0..head_dim {
-                                dot += q_row[d] * k_row[d];
+                            
+                            let mut dot = 0i32;
+                            
+                            #[cfg(target_arch = "aarch64")]
+                            unsafe {
+                                // NEON SIMD vdotq_s32 path
+                                let mut sum_vec = vdupq_n_s32(0);
+                                let chunks = head_dim / 16;
+                                for c in 0..chunks {
+                                    let q_chunk = vld1q_s8(q_row.as_ptr().add(c * 16));
+                                    let k_chunk = vld1q_s8(k_row.as_ptr().add(c * 16));
+                                    
+                                    // Use stable NEON instructions instead of unstable vdotq_s32
+                                    let q_low = vget_low_s8(q_chunk);
+                                    let q_high = vget_high_s8(q_chunk);
+                                    let k_low = vget_low_s8(k_chunk);
+                                    let k_high = vget_high_s8(k_chunk);
+                                    
+                                    let p_low = vmull_s8(q_low, k_low);
+                                    let p_high = vmull_s8(q_high, k_high);
+                                    
+                                    let sum32_low = vpaddlq_s16(p_low);
+                                    let sum32_high = vpaddlq_s16(p_high);
+                                    
+                                    sum_vec = vaddq_s32(sum_vec, vaddq_s32(sum32_low, sum32_high));
+                                }
+                                dot += vaddvq_s32(sum_vec);
+                                // Tail scalar loop
+                                for d in (chunks * 16)..head_dim {
+                                    dot += q_row[d] as i32 * k_row[d] as i32;
+                                }
                             }
-                            s_ij[i * k_len + j] = dot * scale;
+                            
+                            #[cfg(not(target_arch = "aarch64"))]
+                            {
+                                for d in 0..head_dim {
+                                    dot += q_row[d] as i32 * k_row[d] as i32;
+                                }
+                            }
+                            
+                            // Bit-shift Scaling: >> 3 replaces / sqrt(64)
+                            // We shift it into Q16.16 format for the exponential approximation
+                            s_ij[i * k_len + j] = (dot >> 3) << FIXED_POINT_SHIFT;
                         }
                     }
 
-                    // 2. Local Softmax & O update
+                    // 2. Local Softmax & O update (Zero-Float I-Softmax)
                     for i in 0..q_len {
-                        let global_i = q_start + i;
-                        
-                        let mut m_ij = f32::NEG_INFINITY;
+                        let mut m_ij = -999999i32;
                         for j in 0..k_len {
                             let val = s_ij[i * k_len + j];
                             if val > m_ij {
@@ -112,48 +153,61 @@ pub mod attention {
                             }
                         }
 
-                        if m_ij == f32::NEG_INFINITY {
+                        if m_ij == -999999 {
                             continue;
                         }
 
-                        let m_i_old = m[global_i];
+                        let m_i_old = m[i];
                         let m_i_new = if m_i_old > m_ij { m_i_old } else { m_ij };
-                        m[global_i] = m_i_new;
+                        m[i] = m_i_new;
 
-                        let exp_diff = libm::expf(m_i_old - m_i_new);
-                        let mut l_i_new = l[global_i] * exp_diff;
+                        // Integer exponential approximation for scaling
+                        let exp_diff = exp_approx_q16(m_i_old - m_i_new);
+                        
+                        // l[i] *= exp_diff (in Q16.16)
+                        let mut l_i_new = ((l[i] as i64 * exp_diff as i64) >> FIXED_POINT_SHIFT) as i32;
 
                         for j in 0..k_len {
-                            let p = libm::expf(s_ij[i * k_len + j] - m_i_new);
+                            let p = exp_approx_q16(s_ij[i * k_len + j] - m_i_new);
                             p_ij[j] = p;
                             l_i_new += p;
                         }
-                        l[global_i] = l_i_new;
+                        l[i] = l_i_new;
 
                         // 3. P * V (Local Accumulation)
-                        let out_row = &mut output[global_i * head_dim .. (global_i + 1) * head_dim];
+                        let out_row = &mut out_tile[i * head_dim .. (i + 1) * head_dim];
                         for d in 0..head_dim {
-                            out_row[d] *= exp_diff;
-                            let mut pv = 0.0;
+                            // Scale existing accumulated output
+                            let scaled_out = ((out_row[d] as i64 * exp_diff as i64) >> FIXED_POINT_SHIFT) as i32;
+                            
+                            let mut pv = 0i64;
                             for j in 0..k_len {
-                                if p_ij[j] > 0.0 {
-                                    pv += p_ij[j] * v[(k_start + j) * head_dim + d];
+                                if p_ij[j] > 0 {
+                                    pv += p_ij[j] as i64 * v[(k_start + j) * head_dim + d] as i64;
                                 }
                             }
-                            out_row[d] += pv;
+                            
+                            let new_val = scaled_out + ((pv >> FIXED_POINT_SHIFT) as i32);
+                            out_row[d] = new_val.clamp(-128, 127) as i8;
                         }
                     }
                 }
-            }
-
-            // Final normalization
-            for i in 0..seq_len {
-                let l_inv = if l[i] > 0.0 { 1.0 / l[i] } else { 0.0 };
-                let out_row = &mut output[i * head_dim .. (i + 1) * head_dim];
-                for d in 0..head_dim {
-                    out_row[d] *= l_inv;
+                
+                // Final integer normalization for this tile
+                for i in 0..q_len {
+                    let l_val = l[i];
+                    if l_val > 0 {
+                        let out_row = &mut out_tile[i * head_dim .. (i + 1) * head_dim];
+                        for d in 0..head_dim {
+                            let scale = l_val >> FIXED_POINT_SHIFT;
+                            if scale > 0 {
+                                let normalized = out_row[d] as i32 / scale;
+                                out_row[d] = normalized.clamp(-128, 127) as i8;
+                            }
+                        }
+                    }
                 }
-            }
+            });
             
             output
         }

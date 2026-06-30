@@ -66,6 +66,8 @@ fn main() {
         num_rows,
         blocks_per_row,
         num_threads: 8,
+        tree_mask: core::ptr::null(),
+        tree_size: 0,
     };
 
     println!("Starting Decode (TPS) benchmark...");
@@ -94,6 +96,8 @@ fn main() {
         num_rows,
         blocks_per_row,
         num_threads: 8,
+        tree_mask: core::ptr::null(),
+        tree_size: 0,
     };
 
     // Warmup

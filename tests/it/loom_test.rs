@@ -26,6 +26,8 @@ fn test_vec101_loom_concurrency() {
             blocks_per_row,
             batch_size,
             num_threads,
+            tree_mask: core::ptr::null(),
+            tree_size: 0,
             block_size: 16,
             kv_blocks: std::ptr::null(),
             num_blocks: 0,

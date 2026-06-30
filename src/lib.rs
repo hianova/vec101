@@ -18,6 +18,7 @@ pub mod components;
 pub mod feeder;
 pub mod ops;
 pub mod ffi;
+pub mod math_int;
 
 pub use components::{memory_tracker, attention, tokenizer};
 
@@ -26,5 +27,3 @@ pub use compute::vec101_compute;
 pub use components::memory_tracker::{check_memory_leaks, check_thread_drops, ScopedResource};
 pub use types::{vec101_block, vec101_context};
 pub use ffi::vec101_compute_c;
-
-
