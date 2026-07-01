@@ -110,6 +110,7 @@ fn bench_vec101(c: &mut Criterion) {
         num_threads: 1, // Measure single-thread CPU core logic time for micro-bench
         tree_mask: core::ptr::null(),
         tree_size: 0,
+        hardware_handle: core::ptr::null_mut(),
     };
 
     let mut group = c.benchmark_group("Compute Comparison (Batch=1)");

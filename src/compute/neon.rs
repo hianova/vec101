@@ -84,7 +84,7 @@ unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
     let scale = *ctx.s_stream.add(row);
     let mut final_sum = 0.0f32;
     
-    let q4_blocks_per_row = ctx.blocks_per_row;
+    let q4_blocks_per_row = ctx.blocks_per_row * 8;
     
     let mask = vdupq_n_u8(0x0F);
     let eight = vdupq_n_u8(8);
@@ -251,7 +251,7 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
         row_sums[b] = 0.0;
     }
     
-    let q4_blocks_per_row = ctx.blocks_per_row;
+    let q4_blocks_per_row = ctx.blocks_per_row * 8;
     let in_features = q4_blocks_per_row * 32;
     
     let mask = vdupq_n_u8(0x0F);

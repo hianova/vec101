@@ -69,6 +69,8 @@ pub fn silu_approx_i8(x: i8) -> i8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate alloc;
+    use alloc::vec;
 
     #[test]
     fn test_exp_approx() {
@@ -80,7 +82,6 @@ mod tests {
             let actual = v.exp();
             
             let diff = (res_float - actual).abs();
-            println!("exp({}) -> approx: {}, actual: {}, diff: {}", v, res_float, actual, diff);
             // Verify error is within acceptable linear approximation margin (< 0.25)
             assert!(diff < 0.25, "Error too large for {}!", v);
         }
@@ -95,7 +96,6 @@ mod tests {
             let actual = x_f32 / (1.0 + (-x_f32).exp());
             let actual_i8 = actual.round() as i8;
             
-            println!("silu({}) -> approx: {}, actual_i8: {}", x, res_i8, actual_i8);
             // Margin of error is 1 due to integer rounding
             let diff = (res_i8 as i32 - actual_i8 as i32).abs();
             assert!(diff <= 1, "SiLU error too large for {}!", x);

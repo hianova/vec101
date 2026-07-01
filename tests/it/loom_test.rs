@@ -31,6 +31,7 @@ fn test_vec101_loom_concurrency() {
             block_size: 16,
             kv_blocks: std::ptr::null(),
             num_blocks: 0,
+            hardware_handle: core::ptr::null_mut(),
         };
 
         unsafe {

@@ -109,6 +109,9 @@ pub struct vec101_context {
     pub tree_mask: *const u32,
     /// Number of nodes in the speculative decoding tree
     pub tree_size: usize,
+    /// Opaque pointer to the hardware backend (e.g., CudaDevice or Metal Device)
+    /// The application layer is responsible for its allocation and lifecycle
+    pub hardware_handle: *mut core::ffi::c_void,
 }
 
 unsafe impl Send for vec101_context {}

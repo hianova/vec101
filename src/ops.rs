@@ -503,9 +503,9 @@ mod tests {
 
     #[test]
     fn test_rmsnorm_int8() {
-        let q = vec![10i8, 20i8, 30i8, 40i8];
-        let weight_i8 = vec![127i8; 4];
-        let mut out_q = vec![0i8; 4];
+        let q = vec![10i8; 32];
+        let weight_i8 = vec![127i8; 32];
+        let mut out_q = vec![0i8; 32];
         let mut out_scales = vec![0.0f32; 1];
         rmsnorm_int8(&q, &weight_i8, 1.0/127.0, 1e-5, &mut out_q, &mut out_scales);
         assert!(out_scales[0] > 0.0);
@@ -515,10 +515,13 @@ mod tests {
 
     #[test]
     fn test_swiglu_int8() {
-        let q = vec![50i8, -50i8, 0i8, 100i8];
+        let mut q = vec![50i8; 32];
+        q[1] = -50i8;
+        q[2] = 0i8;
+        q[3] = 100i8;
         let in_scales = vec![0.1f32];
-        let v_weight_i8 = vec![127i8; 4];
-        let mut out_q = vec![0i8; 4];
+        let v_weight_i8 = vec![127i8; 32];
+        let mut out_q = vec![0i8; 32];
         let mut out_scales = vec![0.0f32; 1];
         swiglu_int8(&q, &in_scales, &v_weight_i8, 1.0/127.0, &mut out_q, &mut out_scales);
         assert!(out_scales[0] > 0.0);
@@ -543,5 +546,31 @@ mod tests {
         let mut k = vec![1.0, 0.0, 1.0, 0.0];
         rope(&mut q, &mut k, 0, 4, 2, 10000.0);
         assert_eq!(q[0], 1.0); // At pos 0, rot is 0
+    }
+
+    #[test]
+    fn test_swiglu() {
+        let mut x = vec![1.0, 2.0];
+        let v = vec![2.0, 3.0];
+        swiglu(&mut x, &v);
+        assert!(x[0] > 0.0);
+    }
+
+    #[test]
+    fn test_geglu() {
+        let mut x = vec![1.0, 2.0];
+        let v = vec![2.0, 3.0];
+        geglu(&mut x, &v);
+        assert!(x[0] > 0.0);
+    }
+
+    #[test]
+    fn test_attention() {
+        let q = vec![1.0, 0.0, 0.0, 1.0];
+        let k_cache = vec![vec![1.0, 0.0, 0.0, 1.0]];
+        let v_cache = vec![vec![1.0, 2.0, 3.0, 4.0]];
+        let mut out = vec![0.0; 4];
+        attention(&q, &k_cache, &v_cache, 0, 2, 2, &mut out);
+        assert_eq!(out.len(), 4);
     }
 }

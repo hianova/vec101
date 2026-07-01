@@ -3,11 +3,38 @@ use metal::*;
 #[cfg(feature = "gpu-metal")]
 use core::ffi::c_void;
 use crate::types::{vec101_context, vec101_block, Vec101SuperBlock};
+use crate::hal::Vec101Backend;
+extern crate alloc;
+
+#[cfg(feature = "gpu-metal")]
+pub struct MetalBackend {}
+
+#[cfg(feature = "gpu-metal")]
+impl MetalBackend {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[cfg(feature = "gpu-metal")]
+impl Vec101Backend for MetalBackend {
+    fn compute(&self, ctx: &vec101_context) {
+        if ctx.quant_type == crate::types::QuantType::Bit1_58 {
+            let num_micro = ctx.blocks_per_row * 8;
+            let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
+            let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
+            let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
+            unsafe { metal_compute_internal(ctx, &x_blocks, x_scale) };
+        } else if ctx.quant_type == crate::types::QuantType::Q4_0 {
+            unsafe { metal_compute_q4_0_internal(ctx) };
+        }
+    }
+}
 
 #[cfg(feature = "gpu-metal")]
 /// # Safety
 /// Assumes all context pointers are valid and aligned.
-pub unsafe fn metal_compute(ctx: &vec101_context, x_blocks: &[vec101_block], x_scale: f32) {
+unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block], x_scale: f32) {
     let device = Device::system_default().expect("No Metal device found");
     let command_queue = device.new_command_queue();
     
@@ -80,7 +107,7 @@ pub unsafe fn metal_compute(ctx: &vec101_context, x_blocks: &[vec101_block], x_s
 }
 
 #[cfg(feature = "gpu-metal")]
-pub unsafe fn metal_compute_q4_0(ctx: &vec101_context) {
+unsafe fn metal_compute_q4_0_internal(ctx: &vec101_context) {
     let device = Device::system_default().expect("No Metal device found");
     let command_queue = device.new_command_queue();
     

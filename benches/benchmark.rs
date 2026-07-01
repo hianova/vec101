@@ -68,6 +68,7 @@ fn main() {
         num_threads: 8,
         tree_mask: core::ptr::null(),
         tree_size: 0,
+        hardware_handle: core::ptr::null_mut(),
     };
 
     println!("Starting Decode (TPS) benchmark...");
@@ -98,6 +99,7 @@ fn main() {
         num_threads: 8,
         tree_mask: core::ptr::null(),
         tree_size: 0,
+        hardware_handle: core::ptr::null_mut(),
     };
 
     // Warmup

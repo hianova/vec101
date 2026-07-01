@@ -14,6 +14,8 @@ extern crate alloc;
 pub mod sync;
 pub mod types;
 pub mod compute;
+pub mod hal;
+
 pub mod components;
 pub mod feeder;
 pub mod ops;

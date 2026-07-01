@@ -52,7 +52,7 @@ unsafe fn process_row_scalar_gemv_q4_0(row: usize, ctx: &vec101_context) {
     let scale = *ctx.s_stream.add(row);
     let mut final_sum = 0.0f32;
     
-    let q4_blocks_per_row = ctx.blocks_per_row;
+    let q4_blocks_per_row = ctx.blocks_per_row * 8;
     
     for col in 0..q4_blocks_per_row {
         let block_idx = row * q4_blocks_per_row + col;
@@ -143,7 +143,7 @@ unsafe fn process_row_scalar_gemm_q4_0(row: usize, ctx: &vec101_context, x_t: &[
     let scale = *ctx.s_stream.add(row);
     let mut row_sums_f32 = alloc::vec![0.0f32; ctx.batch_size];
     
-    let q4_blocks_per_row = ctx.blocks_per_row;
+    let q4_blocks_per_row = ctx.blocks_per_row * 8;
     
     for col in 0..q4_blocks_per_row {
         let block_idx = row * q4_blocks_per_row + col;

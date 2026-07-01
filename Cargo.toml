@@ -13,10 +13,12 @@ readme = "README.md"
 default = ["std"]
 std = []
 gpu-metal = ["metal", "objc"]
+cuda = ["cudarc"]
 
 [dependencies]
 libm = "0.2.8"
 rayon = "1.12.0"
+cudarc = { version = "0.11", optional = true, features = ["cublas"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = { version = "0.28", optional = true }
@@ -40,6 +42,11 @@ harness = false
 [[bench]]
 name = "perf_bench"
 path = "benches/perf_bench.rs"
+harness = false
+
+[[bench]]
+name = "overhead"
+path = "benches/overhead.rs"
 harness = false
 
 [lints.rust]

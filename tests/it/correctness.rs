@@ -24,7 +24,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 #[test]
 fn test_vec101_correctness() {
     let mut rng = XorShift32::new(42);
-    let batch_size = 2;
+    let batch_size = 6;
     let num_rows = 10;
     let blocks_per_row = 1; // 1 SuperBlock = 2048 features
     let total_blocks = num_rows * blocks_per_row;
@@ -78,6 +78,7 @@ fn test_vec101_correctness() {
         block_size: 16,
         kv_blocks: std::ptr::null(),
         num_blocks: 0,
+        hardware_handle: core::ptr::null_mut(),
     };
 
     unsafe {
@@ -152,6 +153,7 @@ fn test_ffi_c_interface() {
         block_size: 16,
         kv_blocks: std::ptr::null(),
         num_blocks: 0,
+        hardware_handle: core::ptr::null_mut(),
     };
     unsafe {
         vec101_compute_c(&ctx);
@@ -160,24 +162,24 @@ fn test_ffi_c_interface() {
 
 #[test]
 fn test_tiled_attention() {
-    use vec101::attention::CpuTiledAttention;
+    use vec101::attention::IntegerTiledAttention;
     let seq_len = 8;
     let head_dim = 4;
-    let q = vec![1.0f32; seq_len * head_dim];
-    let k = vec![1.0f32; seq_len * head_dim];
-    let v = vec![1.0f32; seq_len * head_dim];
-    let output = CpuTiledAttention::compute_attention_f32(&q, &k, &v, seq_len, head_dim, 4);
+    let q = vec![1i8; seq_len * head_dim];
+    let k = vec![1i8; seq_len * head_dim];
+    let v = vec![1i8; seq_len * head_dim];
+    let output = IntegerTiledAttention::compute_attention_i8(&q, &k, &v, seq_len, head_dim, 4);
     assert_eq!(output.len(), seq_len * head_dim);
     // Should be valid output
     for val in output {
-        assert!(!val.is_nan());
+        assert!(val >= -128 && val <= 127);
     }
 }
 
 #[test]
 fn test_vec101_q4_0_correctness() {
     let mut rng = XorShift32::new(42);
-    let batch_size = 2;
+    let batch_size = 6;
     let num_rows = 10;
     let blocks_per_row = 1;
     let q4_blocks_per_row = blocks_per_row * 8;
@@ -229,6 +231,7 @@ fn test_vec101_q4_0_correctness() {
         block_size: 16,
         kv_blocks: std::ptr::null(),
         num_blocks: 0,
+        hardware_handle: core::ptr::null_mut(),
     };
 
     unsafe {
@@ -239,6 +242,74 @@ fn test_vec101_q4_0_correctness() {
     println!("Q4_0 Cosine Similarity: {}", sim);
     let threshold = 0.99;
     assert!(sim > threshold, "Q4_0 Similarity {} is below threshold {}", sim, threshold);
+}
+
+#[test]
+fn test_vec101_q4_0_correctness_gemv() {
+    let mut rng = XorShift32::new(42);
+    let batch_size = 1;
+    let num_rows = 10;
+    let blocks_per_row = 1;
+    let q4_blocks_per_row = blocks_per_row * 8;
+    let total_q4_blocks = num_rows * q4_blocks_per_row;
+
+    let mut w_stream = vec![BlockQ4_0 { d: vec101::types::f32_to_f16(1.0), qs: [0; 16] }; total_q4_blocks];
+    for block in &mut w_stream {
+        block.d = vec101::types::f32_to_f16(0.5 + rng.next_f32() * 0.5);
+        for q in &mut block.qs {
+            *q = rng.next() as u8;
+        }
+    }
+
+    let in_features = q4_blocks_per_row * 32;
+    let mut x_stream = vec![0i8; batch_size * in_features];
+    for x in &mut x_stream {
+        *x = rng.next_i8();
+    }
+
+    let mut s_stream = vec![0f32; num_rows];
+    for s in &mut s_stream {
+        *s = 0.1 + rng.next_f32() * 1.4;
+    }
+
+    let mut out_expected = vec![0f32; batch_size * num_rows];
+    naive_q4_0_compute(
+        batch_size,
+        num_rows,
+        blocks_per_row,
+        &w_stream,
+        &x_stream,
+        &s_stream,
+        &mut out_expected,
+    );
+
+    let mut out_actual = vec![0f32; batch_size * num_rows];
+    let ctx = vec101_context {
+        quant_type: vec101::types::QuantType::Q4_0,
+        w_stream: w_stream.as_ptr() as *const u8,
+        x_stream: x_stream.as_ptr(),
+        s_stream: s_stream.as_ptr(),
+        out_buffer: out_actual.as_mut_ptr(),
+        batch_size,
+        num_rows,
+        blocks_per_row,
+        num_threads: 4,
+        tree_mask: core::ptr::null(),
+        tree_size: 0,
+        block_size: 16,
+        kv_blocks: std::ptr::null(),
+        num_blocks: 0,
+        hardware_handle: core::ptr::null_mut(),
+    };
+
+    unsafe {
+        vec101_compute(&ctx);
+    }
+
+    let sim = cosine_similarity(&out_expected, &out_actual);
+    println!("Q4_0 GEMV Cosine Similarity: {}", sim);
+    let threshold = 0.99;
+    assert!(sim > threshold, "Q4_0 GEMV Similarity {} is below threshold {}", sim, threshold);
 }
 
 
