@@ -1,44 +1,3 @@
-/// An f16 type represented as u16 for strict no_std compatibility.
-#[allow(non_camel_case_types)]
-pub type f16 = u16;
-
-#[inline(always)]
-pub fn f16_to_f32(h: f16) -> f32 {
-    let mut bits = (h as u32 & 0x7fff) << 13;
-    let exp = bits >> 23;
-    if exp == 0 {
-        if bits != 0 {
-            bits |= 0x00800000;
-            let mut e = 113;
-            while (bits & 0x00800000) == 0 {
-                e -= 1;
-                bits <<= 1;
-            }
-            bits &= !0x00800000;
-            bits |= e << 23;
-        }
-    } else {
-        bits += 0x38000000;
-    }
-    bits |= (h as u32 & 0x8000) << 16;
-    f32::from_bits(bits)
-}
-
-#[inline(always)]
-pub fn f32_to_f16(f: f32) -> f16 {
-    let bits = f.to_bits();
-    let sign = (bits >> 16) & 0x8000;
-    let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
-    let frac = (bits >> 13) & 0x3ff;
-    
-    if exp <= 0 {
-        sign as f16 // flush subnormals to zero
-    } else if exp >= 31 {
-        (sign | 0x7c00) as f16 // infinity
-    } else {
-        (sign | ((exp as u32) << 10) | frac) as f16
-    }
-}
 
 /// The fundamental compute block for vec101.
 #[repr(C)]
@@ -54,7 +13,7 @@ pub struct vec101_block {
 pub struct Vec101SuperBlock {
     // 第 1 個 Cache Line (64 Bytes)：專門放 Metadata
     // 支援 8 個 Block 的 Scale 和 Offset
-    pub scales: [f16; 8],
+    pub scales: [i16; 8],
     pub offsets: [i16; 8],
     pub _padding: [u8; 32],
     // 其餘 8 個 Cache Line：存放實際的 bit 流 (每列對應一個 Block)
@@ -65,7 +24,7 @@ pub struct Vec101SuperBlock {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ4_0 {
-    pub d: f16,           // Block Scale (Delta)
+    pub d: i16,           // Block Scale (Delta)
     pub qs: [u8; 16],     // 32 個 4-bit 權重打包
 }
 
@@ -88,11 +47,11 @@ pub struct vec101_context {
     /// Continuous activation values stream.
     pub x_stream: *const i8,
     /// Quantization scaling factor stream per row.
-    pub s_stream: *const f32,
+    pub s_stream: *const i32,
     /// Output buffer.
-    pub out_buffer: *mut f32,
+    pub out_buffer: *mut i32,
     /// Pointers to Paged Attention KV blocks.
-    pub kv_blocks: *const *const f32,
+    pub kv_blocks: *const *const i32,
     /// Number of valid blocks in the kv_blocks array.
     pub num_blocks: usize,
     /// Number of tokens per block (e.g. 16 or 64).
@@ -119,7 +78,7 @@ unsafe impl Sync for vec101_context {}
 
 /// A simple lock-free mailbox using AtomicU64 for auto-fill speculative states.
 pub struct LockFreeMailbox {
-    state: core::sync::atomic::AtomicU64,
+    state: crate::sync::AtomicU32,
 }
 
 impl Default for LockFreeMailbox {
@@ -129,29 +88,37 @@ impl Default for LockFreeMailbox {
 }
 
 impl LockFreeMailbox {
+    #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
-            state: core::sync::atomic::AtomicU64::new(0),
+            state: crate::sync::AtomicU32::new(u32::MAX),
+        }
+    }
+
+    #[cfg(loom)]
+    pub fn new() -> Self {
+        Self {
+            state: crate::sync::AtomicU32::new(u32::MAX),
         }
     }
 
     /// Try to push speculative data. Fails if already full.
     pub fn try_push(&self, data: u32) -> Result<(), u32> {
-        let current = self.state.load(core::sync::atomic::Ordering::Acquire);
-        if current != 0 {
+        let current = self.state.load(crate::sync::Ordering::Acquire);
+        if current != u32::MAX {
             return Err(data);
         }
-        self.state.store(data as u64, core::sync::atomic::Ordering::Release);
+        self.state.store(data, crate::sync::Ordering::Release);
         Ok(())
     }
 
     /// Try to pop speculative data. Returns None if empty.
     pub fn try_pop(&self) -> Option<u32> {
-        let current = self.state.swap(0, core::sync::atomic::Ordering::Acquire);
-        if current == 0 {
+        let current = self.state.swap(u32::MAX, crate::sync::Ordering::Acquire);
+        if current == u32::MAX {
             None
         } else {
-            Some(current as u32)
+            Some(current)
         }
     }
 }
@@ -165,4 +132,33 @@ pub struct DualEngineContext<'a> {
 
     /// 2. 你發明的無鎖信箱 (Lock-free Mailbox)
     pub auto_fill_mailbox: LockFreeMailbox,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_core_structs_debug() {
+        let block1 = vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] };
+        let _ = alloc::format!("{:?}", block1);
+
+        let sb = Vec101SuperBlock {
+            scales: [0; 8],
+            offsets: [0; 8],
+            _padding: [0; 32],
+            blocks: [block1; 8],
+        };
+        let _ = alloc::format!("{:?}", sb);
+
+        let q4 = BlockQ4_0 { d: 0, qs: [0; 16] };
+        let _ = alloc::format!("{:?}", q4);
+        
+        let _ = alloc::format!("{:?}", QuantType::Bit1_58);
+    }
+
+    #[test]
+    fn test_mailbox_default() {
+        let _ = LockFreeMailbox::default();
+    }
 }

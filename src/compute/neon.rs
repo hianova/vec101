@@ -1,4 +1,4 @@
-use crate::types::{vec101_context, f16_to_f32};
+use crate::core::vec101_context;
 extern crate alloc;
 
 #[cfg(target_arch = "aarch64")]
@@ -15,26 +15,27 @@ unsafe fn expand_bits_to_mask_neon(w_16: u16, bit_mask: uint8x16_t) -> int8x16_t
 
 #[cfg(target_arch = "aarch64")]
 pub unsafe fn process_row_neon_gemv(row: usize, ctx: &vec101_context) {
+    if ctx.blocks_per_row == 0 { return; }
     match ctx.quant_type {
-        crate::types::QuantType::Bit1_58 => process_row_neon_gemv_bit1_58(row, ctx),
-        crate::types::QuantType::Q4_0 => process_row_neon_gemv_q4_0(row, ctx),
+        crate::core::QuantType::Bit1_58 => process_row_neon_gemv_bit1_58(row, ctx),
+        crate::core::QuantType::Q4_0 => process_row_neon_gemv_q4_0(row, ctx),
     }
 }
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_neon_gemv_bit1_58(row: usize, ctx: &vec101_context) {
     let scale = *ctx.s_stream.add(row);
-    let mut final_sum = 0.0f32;
+    let mut final_sum = 0i32;
     
     let bit_mask_arr: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
     let bit_mask = vld1q_u8(bit_mask_arr.as_ptr());
 
     for col in 0..ctx.blocks_per_row {
         let block_idx = row * ctx.blocks_per_row + col;
-        let w_super = &(*(ctx.w_stream as *const crate::types::Vec101SuperBlock).add(block_idx));
+        let w_super = &(*(ctx.w_stream as *const crate::core::Vec101SuperBlock).add(block_idx));
 
         for sub_blk in 0..8 {
-            let micro_scale = f16_to_f32(w_super.scales[sub_blk]);
+            let micro_scale = w_super.scales[sub_blk] as i32;
             let w_block = &w_super.blocks[sub_blk];
             let mut acc = vdupq_n_s32(0);
             
@@ -71,18 +72,18 @@ unsafe fn process_row_neon_gemv_bit1_58(row: usize, ctx: &vec101_context) {
                 );
             }
             let sum = vaddvq_s32(acc);
-            final_sum += (sum as f32) * micro_scale;
+            final_sum += (sum * micro_scale) >> 8;
         }
     }
 
     let out_ptr = ctx.out_buffer.add(row);
-    *out_ptr += final_sum * scale;
+    *out_ptr += ((final_sum as i64 * scale as i64) >> 16) as i32;
 }
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
     let scale = *ctx.s_stream.add(row);
-    let mut final_sum = 0.0f32;
+    let mut final_sum = 0i32;
     
     let q4_blocks_per_row = ctx.blocks_per_row * 8;
     
@@ -91,7 +92,7 @@ unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
     
     for col in 0..q4_blocks_per_row {
         let block_idx = row * q4_blocks_per_row + col;
-        let w_block = &(*(ctx.w_stream as *const crate::types::BlockQ4_0).add(block_idx));
+        let w_block = &(*(ctx.w_stream as *const crate::core::BlockQ4_0).add(block_idx));
         
         let q_vec = vld1q_u8(w_block.qs.as_ptr());
         
@@ -116,23 +117,24 @@ unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
         );
         
         let block_sum = vaddvq_s32(acc);
-        final_sum += (block_sum as f32) * f16_to_f32(w_block.d);
+        final_sum += (block_sum * w_block.d as i32) >> 8;
     }
     
     let out_ptr = ctx.out_buffer.add(row);
-    *out_ptr += final_sum * scale;
+    *out_ptr += ((final_sum as i64 * scale as i64) >> 16) as i32;
 }
 
 #[cfg(target_arch = "aarch64")]
-pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: &mut [f32]) {
+pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
+    if ctx.blocks_per_row == 0 { return; }
     match ctx.quant_type {
-        crate::types::QuantType::Bit1_58 => process_row_neon_gemm_bit1_58(row, ctx, row_sums),
-        crate::types::QuantType::Q4_0 => process_row_neon_gemm_q4_0(row, ctx, row_sums),
+        crate::core::QuantType::Bit1_58 => process_row_neon_gemm_bit1_58(row, ctx, row_sums),
+        crate::core::QuantType::Q4_0 => process_row_neon_gemm_q4_0(row, ctx, row_sums),
     }
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_sums: &mut [f32]) {
+unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
     let scale = *ctx.s_stream.add(row);
     let in_features = ctx.blocks_per_row * 2048;
     
@@ -140,15 +142,15 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
     let bit_mask = vld1q_u8(bit_mask_arr.as_ptr());
 
     for b in 0..ctx.batch_size {
-        row_sums[b] = 0.0;
+        row_sums[b] = 0;
     }
 
     for col in 0..ctx.blocks_per_row {
         let block_idx = row * ctx.blocks_per_row + col;
-        let w_super = &(*(ctx.w_stream as *const crate::types::Vec101SuperBlock).add(block_idx));
+        let w_super = &(*(ctx.w_stream as *const crate::core::Vec101SuperBlock).add(block_idx));
 
         for sub_blk in 0..8 {
-            let micro_scale = f16_to_f32(w_super.scales[sub_blk]);
+            let micro_scale = w_super.scales[sub_blk] as i32;
             let w_block = &w_super.blocks[sub_blk];
 
             let mut w_micro = [0i8; 256];
@@ -206,10 +208,10 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                         w = in(vreg) w_val,
                     );
                 }
-                row_sums[b_idx + 0] += (vaddvq_s32(acc0) as f32) * micro_scale;
-                row_sums[b_idx + 1] += (vaddvq_s32(acc1) as f32) * micro_scale;
-                row_sums[b_idx + 2] += (vaddvq_s32(acc2) as f32) * micro_scale;
-                row_sums[b_idx + 3] += (vaddvq_s32(acc3) as f32) * micro_scale;
+                row_sums[b_idx + 0] += (vaddvq_s32(acc0) * micro_scale) >> 8;
+                row_sums[b_idx + 1] += (vaddvq_s32(acc1) * micro_scale) >> 8;
+                row_sums[b_idx + 2] += (vaddvq_s32(acc2) * micro_scale) >> 8;
+                row_sums[b_idx + 3] += (vaddvq_s32(acc3) * micro_scale) >> 8;
                 b_idx += 4;
             }
 
@@ -232,23 +234,23 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                 }
 
                 let sum = vaddvq_s32(acc);
-                row_sums[b_idx] += (sum as f32) * micro_scale;
+                row_sums[b_idx] += (sum * micro_scale) >> 8;
                 b_idx += 1;
             }
         }
     }
 
     for b in 0..ctx.batch_size {
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums[b] * scale;
+        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((row_sums[b] as i64 * scale as i64) >> 16) as i32;
     }
 }
 
 #[cfg(target_arch = "aarch64")]
-unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums: &mut [f32]) {
+unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
     let scale = *ctx.s_stream.add(row);
     
     for b in 0..ctx.batch_size {
-        row_sums[b] = 0.0;
+        row_sums[b] = 0;
     }
     
     let q4_blocks_per_row = ctx.blocks_per_row * 8;
@@ -261,7 +263,7 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
     while b_idx + 3 < ctx.batch_size {
         for col in 0..q4_blocks_per_row {
             let block_idx = row * q4_blocks_per_row + col;
-            let w_block = &(*(ctx.w_stream as *const crate::types::BlockQ4_0).add(block_idx));
+            let w_block = &(*(ctx.w_stream as *const crate::core::BlockQ4_0).add(block_idx));
             
             let q_vec = vld1q_u8(w_block.qs.as_ptr());
             let q0_u8 = vandq_u8(q_vec, mask);
@@ -309,11 +311,11 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
                 w1 = in(vreg) q1_s8,
             );
             
-            let d = f16_to_f32(w_block.d);
-            row_sums[b_idx + 0] += (vaddvq_s32(acc0) as f32) * d;
-            row_sums[b_idx + 1] += (vaddvq_s32(acc1) as f32) * d;
-            row_sums[b_idx + 2] += (vaddvq_s32(acc2) as f32) * d;
-            row_sums[b_idx + 3] += (vaddvq_s32(acc3) as f32) * d;
+            let d = w_block.d as i32;
+            row_sums[b_idx + 0] += (vaddvq_s32(acc0) * d) >> 8;
+            row_sums[b_idx + 1] += (vaddvq_s32(acc1) * d) >> 8;
+            row_sums[b_idx + 2] += (vaddvq_s32(acc2) * d) >> 8;
+            row_sums[b_idx + 3] += (vaddvq_s32(acc3) * d) >> 8;
         }
         b_idx += 4;
     }
@@ -321,7 +323,7 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
     while b_idx < ctx.batch_size {
         for col in 0..q4_blocks_per_row {
             let block_idx = row * q4_blocks_per_row + col;
-            let w_block = &(*(ctx.w_stream as *const crate::types::BlockQ4_0).add(block_idx));
+            let w_block = &(*(ctx.w_stream as *const crate::core::BlockQ4_0).add(block_idx));
             
             let q_vec = vld1q_u8(w_block.qs.as_ptr());
             let q0_u8 = vandq_u8(q_vec, mask);
@@ -343,12 +345,56 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
                 w1 = in(vreg) q1_s8,
             );
             
-            row_sums[b_idx] += (vaddvq_s32(acc) as f32) * f16_to_f32(w_block.d);
+            row_sums[b_idx] += (vaddvq_s32(acc) * w_block.d as i32) >> 8;
         }
         b_idx += 1;
     }
     
     for b in 0..ctx.batch_size {
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += row_sums[b] * scale;
+        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((row_sums[b] as i64 * scale as i64) >> 16) as i32;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{vec101_context, QuantType, Vec101SuperBlock};
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_neon_gemv_complexity() {
+        let n: usize = std::env::var("COVOPT_N")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse()
+            .unwrap_or(10);
+
+        let blocks_per_row = n;
+        
+        let mut w_stream = vec![0u8; blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()];
+        let mut x_stream = vec![0i8; blocks_per_row * 2048];
+        let mut s_stream = vec![1i32; 1];
+        let mut out_buffer = vec![0i32; 1];
+
+        let ctx = vec101_context {
+            quant_type: QuantType::Bit1_58,
+            w_stream: w_stream.as_mut_ptr() as *const u8,
+            x_stream: x_stream.as_mut_ptr() as *const i8,
+            s_stream: s_stream.as_mut_ptr() as *const i32,
+            out_buffer: out_buffer.as_mut_ptr() as *mut i32,
+            kv_blocks: core::ptr::null(),
+            num_blocks: 0,
+            block_size: 0,
+            batch_size: 1,
+            num_rows: 1,
+            blocks_per_row,
+            num_threads: 1,
+            tree_mask: core::ptr::null(),
+            tree_size: 0,
+            hardware_handle: core::ptr::null_mut(),
+        };
+
+        unsafe {
+            process_row_neon_gemv_bit1_58(0, &ctx);
+        }
     }
 }

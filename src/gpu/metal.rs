@@ -2,7 +2,7 @@
 use metal::*;
 #[cfg(feature = "gpu-metal")]
 use core::ffi::c_void;
-use crate::types::{vec101_context, vec101_block, Vec101SuperBlock};
+use crate::core::{vec101_context, vec101_block, Vec101SuperBlock};
 use crate::hal::Vec101Backend;
 extern crate alloc;
 
@@ -19,13 +19,13 @@ impl MetalBackend {
 #[cfg(feature = "gpu-metal")]
 impl Vec101Backend for MetalBackend {
     fn compute(&self, ctx: &vec101_context) {
-        if ctx.quant_type == crate::types::QuantType::Bit1_58 {
+        if ctx.quant_type == crate::core::QuantType::Bit1_58 {
             let num_micro = ctx.blocks_per_row * 8;
-            let mut x_blocks = alloc::vec![crate::types::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
+            let mut x_blocks = alloc::vec![crate::core::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
             let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
-            let x_scale = crate::ops::quantize_to_ternary(x_slice, &mut x_blocks);
+            let x_scale = crate::util::ops::quantize_to_ternary(x_slice, &mut x_blocks);
             unsafe { metal_compute_internal(ctx, &x_blocks, x_scale) };
-        } else if ctx.quant_type == crate::types::QuantType::Q4_0 {
+        } else if ctx.quant_type == crate::core::QuantType::Q4_0 {
             unsafe { metal_compute_q4_0_internal(ctx) };
         }
     }
@@ -34,7 +34,7 @@ impl Vec101Backend for MetalBackend {
 #[cfg(feature = "gpu-metal")]
 /// # Safety
 /// Assumes all context pointers are valid and aligned.
-unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block], x_scale: f32) {
+unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block], x_scale: i32) {
     let device = Device::system_default().expect("No Metal device found");
     let command_queue = device.new_command_queue();
     
@@ -45,8 +45,8 @@ unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block]
     let pipeline_state = device.new_compute_pipeline_state_with_function(&kernel).unwrap();
     
     let w_len = (ctx.num_rows * ctx.blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()) as u64;
-    let s_len = (ctx.num_rows * core::mem::size_of::<f32>()) as u64;
-    let out_len = (ctx.batch_size * ctx.num_rows * core::mem::size_of::<f32>()) as u64;
+    let s_len = (ctx.num_rows * core::mem::size_of::<i32>()) as u64;
+    let out_len = (ctx.batch_size * ctx.num_rows * core::mem::size_of::<i32>()) as u64;
     let x_len = core::mem::size_of_val(x_blocks) as u64;
     
     // Zero-copy wrapping for large weight buffers
@@ -89,7 +89,7 @@ unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block]
     let blocks_per_row = ctx.blocks_per_row as u32;
     let num_rows = ctx.num_rows as u32;
     compute_encoder.set_bytes(4, core::mem::size_of::<u32>() as u64, &blocks_per_row as *const _ as *const c_void);
-    compute_encoder.set_bytes(5, core::mem::size_of::<f32>() as u64, &x_scale as *const _ as *const c_void);
+    compute_encoder.set_bytes(5, core::mem::size_of::<i32>() as u64, &x_scale as *const _ as *const c_void);
     compute_encoder.set_bytes(6, core::mem::size_of::<u32>() as u64, &num_rows as *const _ as *const c_void);
     
     let grid_size = MTLSize::new(ctx.num_rows as u64, ctx.batch_size as u64, 1);
@@ -118,9 +118,9 @@ unsafe fn metal_compute_q4_0_internal(ctx: &vec101_context) {
     let pipeline_state = device.new_compute_pipeline_state_with_function(&kernel).unwrap();
     
     let q4_blocks_per_row = ctx.blocks_per_row * 8;
-    let w_len = (ctx.num_rows * q4_blocks_per_row * core::mem::size_of::<crate::types::BlockQ4_0>()) as u64;
-    let s_len = (ctx.num_rows * core::mem::size_of::<f32>()) as u64;
-    let out_len = (ctx.batch_size * ctx.num_rows * core::mem::size_of::<f32>()) as u64;
+    let w_len = (ctx.num_rows * q4_blocks_per_row * core::mem::size_of::<crate::core::BlockQ4_0>()) as u64;
+    let s_len = (ctx.num_rows * core::mem::size_of::<i32>()) as u64;
+    let out_len = (ctx.batch_size * ctx.num_rows * core::mem::size_of::<i32>()) as u64;
     let x_len = (ctx.batch_size * q4_blocks_per_row * 32 * core::mem::size_of::<i8>()) as u64;
     
     let w_buffer = device.new_buffer_with_bytes_no_copy(
@@ -160,9 +160,9 @@ unsafe fn metal_compute_q4_0_internal(ctx: &vec101_context) {
     
     let blocks_per_row = ctx.blocks_per_row as u32;
     let num_rows = ctx.num_rows as u32;
-    let x_scale = 1.0f32; // Not used but mapped in shader signature
+    let x_scale = 1i32; // Not used but mapped in shader signature
     compute_encoder.set_bytes(4, core::mem::size_of::<u32>() as u64, &blocks_per_row as *const _ as *const c_void);
-    compute_encoder.set_bytes(5, core::mem::size_of::<f32>() as u64, &x_scale as *const _ as *const c_void);
+    compute_encoder.set_bytes(5, core::mem::size_of::<i32>() as u64, &x_scale as *const _ as *const c_void);
     compute_encoder.set_bytes(6, core::mem::size_of::<u32>() as u64, &num_rows as *const _ as *const c_void);
     
     let grid_size = MTLSize::new(ctx.num_rows as u64, ctx.batch_size as u64, 1);

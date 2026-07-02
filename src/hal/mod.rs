@@ -1,12 +1,6 @@
-use crate::types::vec101_context;
+use crate::core::vec101_context;
 
 pub mod cpu;
-
-#[cfg(feature = "gpu-metal")]
-pub mod metal;
-
-#[cfg(feature = "cuda")]
-pub mod cuda;
 
 /// 統一的硬體抽象特徵 (Hardware Abstraction Layer)
 pub trait Vec101Backend {

@@ -1,4 +1,4 @@
-use crate::types::vec101_context;
+use crate::core::vec101_context;
 use crate::compute::vec101_compute;
 
 /// C-ABI compatible interface to execute the vec101 core engine.

@@ -1,4 +1,4 @@
-use crate::types::vec101_context;
+use crate::core::vec101_context;
 use crate::hal::Vec101Backend;
 
 #[cfg(feature = "cuda")]

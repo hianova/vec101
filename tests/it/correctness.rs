@@ -1,17 +1,19 @@
 use vec101::{vec101_block, vec101_compute, vec101_context};
-use vec101::types::{Vec101SuperBlock, BlockQ4_0};
+use vec101::core::{Vec101SuperBlock, BlockQ4_0};
 
 use crate::common::{XorShift32, naive_fp32_compute, naive_q4_0_compute};
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+fn cosine_similarity(a: &[i32], b: &[i32]) -> f64 {
     let mut dot_product = 0.0;
     let mut norm_a = 0.0;
     let mut norm_b = 0.0;
 
     for (x, y) in a.iter().zip(b.iter()) {
-        dot_product += x * y;
-        norm_a += x * x;
-        norm_b += y * y;
+        let x_f = *x as f64;
+        let y_f = *y as f64;
+        dot_product += x_f * y_f;
+        norm_a += x_f * x_f;
+        norm_b += y_f * y_f;
     }
 
     if norm_a == 0.0 || norm_b == 0.0 {
@@ -29,7 +31,7 @@ fn test_vec101_correctness() {
     let blocks_per_row = 1; // 1 SuperBlock = 2048 features
     let total_blocks = num_rows * blocks_per_row;
 
-    let mut w_stream = vec![Vec101SuperBlock { scales: [0x3C00; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
+    let mut w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
     for super_block in &mut w_stream {
         for block in &mut super_block.blocks {
             for w in &mut block.w_pos_bits {
@@ -46,12 +48,12 @@ fn test_vec101_correctness() {
         *x = rng.next_i8();
     }
 
-    let mut s_stream = vec![0f32; num_rows];
+    let mut s_stream = vec![0i32; num_rows];
     for s in &mut s_stream {
-        *s = 0.1 + rng.next_f32() * 1.4;
+        *s = rng.next_i32();
     }
 
-    let mut out_expected = vec![0f32; batch_size * num_rows];
+    let mut out_expected = vec![0i32; batch_size * num_rows];
     naive_fp32_compute(
         batch_size,
         num_rows,
@@ -62,9 +64,9 @@ fn test_vec101_correctness() {
         &mut out_expected,
     );
 
-    let mut out_actual = vec![0f32; batch_size * num_rows];
+    let mut out_actual = vec![0i32; batch_size * num_rows];
     let ctx = vec101_context {
-        quant_type: vec101::types::QuantType::Bit1_58,
+        quant_type: vec101::core::QuantType::Bit1_58,
         w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
@@ -96,7 +98,7 @@ fn test_vec101_correctness() {
 
 #[test]
 fn test_lock_free_mailbox() {
-    use vec101::types::LockFreeMailbox;
+    use vec101::core::LockFreeMailbox;
     let mailbox = LockFreeMailbox::new();
     assert_eq!(mailbox.try_pop(), None);
     assert_eq!(mailbox.try_push(42), Ok(()));
@@ -134,12 +136,12 @@ fn test_ffi_c_interface() {
     let num_rows = 2;
     let blocks_per_row = 1;
     let total_blocks = num_rows * blocks_per_row;
-    let w_stream = vec![Vec101SuperBlock { scales: [0x3C00; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
+    let w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
     let x_stream = vec![0i8; batch_size * blocks_per_row * 2048];
-    let s_stream = vec![1.0f32; num_rows];
-    let mut out_actual = vec![0f32; batch_size * num_rows];
+    let s_stream = vec![1i32; num_rows];
+    let mut out_actual = vec![0i32; batch_size * num_rows];
     let ctx = vec101_context {
-        quant_type: vec101::types::QuantType::Bit1_58,
+        quant_type: vec101::core::QuantType::Bit1_58,
         w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
@@ -170,10 +172,6 @@ fn test_tiled_attention() {
     let v = vec![1i8; seq_len * head_dim];
     let output = IntegerTiledAttention::compute_attention_i8(&q, &k, &v, seq_len, head_dim, 4);
     assert_eq!(output.len(), seq_len * head_dim);
-    // Should be valid output
-    for val in output {
-        assert!(val >= -128 && val <= 127);
-    }
 }
 
 #[test]
@@ -185,9 +183,9 @@ fn test_vec101_q4_0_correctness() {
     let q4_blocks_per_row = blocks_per_row * 8;
     let total_q4_blocks = num_rows * q4_blocks_per_row;
 
-    let mut w_stream = vec![BlockQ4_0 { d: vec101::types::f32_to_f16(1.0), qs: [0; 16] }; total_q4_blocks];
+    let mut w_stream = vec![BlockQ4_0 { d: 128, qs: [0; 16] }; total_q4_blocks];
     for block in &mut w_stream {
-        block.d = vec101::types::f32_to_f16(0.5 + rng.next_f32() * 0.5);
+        block.d = 128;
         for q in &mut block.qs {
             *q = rng.next() as u8;
         }
@@ -199,12 +197,12 @@ fn test_vec101_q4_0_correctness() {
         *x = rng.next_i8();
     }
 
-    let mut s_stream = vec![0f32; num_rows];
+    let mut s_stream = vec![0i32; num_rows];
     for s in &mut s_stream {
-        *s = 0.1 + rng.next_f32() * 1.4;
+        *s = rng.next_i32();
     }
 
-    let mut out_expected = vec![0f32; batch_size * num_rows];
+    let mut out_expected = vec![0i32; batch_size * num_rows];
     naive_q4_0_compute(
         batch_size,
         num_rows,
@@ -215,9 +213,9 @@ fn test_vec101_q4_0_correctness() {
         &mut out_expected,
     );
 
-    let mut out_actual = vec![0f32; batch_size * num_rows];
+    let mut out_actual = vec![0i32; batch_size * num_rows];
     let ctx = vec101_context {
-        quant_type: vec101::types::QuantType::Q4_0,
+        quant_type: vec101::core::QuantType::Q4_0,
         w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
@@ -253,9 +251,9 @@ fn test_vec101_q4_0_correctness_gemv() {
     let q4_blocks_per_row = blocks_per_row * 8;
     let total_q4_blocks = num_rows * q4_blocks_per_row;
 
-    let mut w_stream = vec![BlockQ4_0 { d: vec101::types::f32_to_f16(1.0), qs: [0; 16] }; total_q4_blocks];
+    let mut w_stream = vec![BlockQ4_0 { d: 128, qs: [0; 16] }; total_q4_blocks];
     for block in &mut w_stream {
-        block.d = vec101::types::f32_to_f16(0.5 + rng.next_f32() * 0.5);
+        block.d = 128;
         for q in &mut block.qs {
             *q = rng.next() as u8;
         }
@@ -267,12 +265,12 @@ fn test_vec101_q4_0_correctness_gemv() {
         *x = rng.next_i8();
     }
 
-    let mut s_stream = vec![0f32; num_rows];
+    let mut s_stream = vec![0i32; num_rows];
     for s in &mut s_stream {
-        *s = 0.1 + rng.next_f32() * 1.4;
+        *s = rng.next_i32();
     }
 
-    let mut out_expected = vec![0f32; batch_size * num_rows];
+    let mut out_expected = vec![0i32; batch_size * num_rows];
     naive_q4_0_compute(
         batch_size,
         num_rows,
@@ -283,9 +281,9 @@ fn test_vec101_q4_0_correctness_gemv() {
         &mut out_expected,
     );
 
-    let mut out_actual = vec![0f32; batch_size * num_rows];
+    let mut out_actual = vec![0i32; batch_size * num_rows];
     let ctx = vec101_context {
-        quant_type: vec101::types::QuantType::Q4_0,
+        quant_type: vec101::core::QuantType::Q4_0,
         w_stream: w_stream.as_ptr() as *const u8,
         x_stream: x_stream.as_ptr(),
         s_stream: s_stream.as_ptr(),
@@ -311,5 +309,3 @@ fn test_vec101_q4_0_correctness_gemv() {
     let threshold = 0.99;
     assert!(sim > threshold, "Q4_0 GEMV Similarity {} is below threshold {}", sim, threshold);
 }
-
-

@@ -90,8 +90,8 @@ def compile_model(model_id, output_path):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="1bitLLM/bitnet_b1_58-large", help="HuggingFace model ID")
+    parser = argparse.ArgumentParser(description="Compile a HuggingFace model into vec101 safetensors")
+    parser.add_argument("--model", type=str, required=True, help="Path to local HuggingFace model or HF Hub ID")
     parser.add_argument("--output", type=str, default="bitnet_compiled.safetensors", help="Output safetensors path")
     args = parser.parse_args()
     
