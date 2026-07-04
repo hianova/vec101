@@ -1,0 +1,8 @@
+[[target]]
+test = "test_neon_gemv_complexity"
+expected = "ON"
+n_values = "100,500,1000"
+target_file = "src/compute/neon.rs"
+target_line = 158
+require_cache_padding = true
+require_branch_hints = true

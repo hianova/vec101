@@ -109,7 +109,7 @@ fn test_lock_free_mailbox() {
 
 #[test]
 fn test_memory_tracker() {
-    use vec101::memory_tracker::{ScopedResource, check_memory_leaks, check_thread_drops};
+    use vec101::{ScopedResource, check_memory_leaks, check_thread_drops};
     assert!(check_memory_leaks());
     assert!(check_thread_drops());
     {

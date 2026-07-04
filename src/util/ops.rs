@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use crate::util::math_int::*;
+use no_std_tool::math::*;
 
 pub fn rmsnorm(x: &mut [i32], weight: &[i32], eps: i32) {
     let hidden_dim = weight.len();

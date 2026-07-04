@@ -19,10 +19,10 @@ pub mod gpu;
 
 pub mod util;
 
-pub use util::components::{memory_tracker, attention, tokenizer};
+pub use util::components::{attention, tokenizer};
 
 
 pub use compute::vec101_compute;
-pub use util::components::memory_tracker::{check_memory_leaks, check_thread_drops, ScopedResource};
+pub use no_std_tool::debug::{check_memory_leaks, check_thread_drops, ScopedResource};
 pub use core::{vec101_block, vec101_context};
 pub use util::ffi::vec101_compute_c;

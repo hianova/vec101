@@ -17,6 +17,7 @@ cuda = ["cudarc"]
 
 [dependencies]
 cudarc = { version = "0.11", optional = true, features = ["cublas"] }
+no_std_tool = { path = "../no_std_tool" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = { version = "0.28", optional = true }
