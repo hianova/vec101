@@ -15,7 +15,6 @@ pub struct Vec101SuperBlock {
     // 支援 8 個 Block 的 Scale 和 Offset
     pub scales: [i16; 8],
     pub offsets: [i16; 8],
-    pub _padding: [u8; 32],
     // 其餘 8 個 Cache Line：存放實際的 bit 流 (每列對應一個 Block)
     pub blocks: [vec101_block; 8], 
 }
@@ -76,53 +75,6 @@ pub struct vec101_context {
 unsafe impl Send for vec101_context {}
 unsafe impl Sync for vec101_context {}
 
-/// A simple lock-free mailbox using AtomicU64 for auto-fill speculative states.
-pub struct LockFreeMailbox {
-    state: crate::sync::AtomicU32,
-}
-
-impl Default for LockFreeMailbox {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LockFreeMailbox {
-    #[cfg(not(loom))]
-    pub const fn new() -> Self {
-        Self {
-            state: crate::sync::AtomicU32::new(u32::MAX),
-        }
-    }
-
-    #[cfg(loom)]
-    pub fn new() -> Self {
-        Self {
-            state: crate::sync::AtomicU32::new(u32::MAX),
-        }
-    }
-
-    /// Try to push speculative data. Fails if already full.
-    pub fn try_push(&self, data: u32) -> Result<(), u32> {
-        let current = self.state.load(crate::sync::Ordering::Acquire);
-        if current != u32::MAX {
-            return Err(data);
-        }
-        self.state.store(data, crate::sync::Ordering::Release);
-        Ok(())
-    }
-
-    /// Try to pop speculative data. Returns None if empty.
-    pub fn try_pop(&self) -> Option<u32> {
-        let current = self.state.swap(u32::MAX, crate::sync::Ordering::Acquire);
-        if current == u32::MAX {
-            None
-        } else {
-            Some(current)
-        }
-    }
-}
-
 /// The Heterogeneous Compute Hub interface (Dual Engine)
 pub struct DualEngineContext<'a> {
     /// 1. 唯一的一份物理記憶體映射 (Zero-copy)
@@ -131,7 +83,7 @@ pub struct DualEngineContext<'a> {
     pub shared_weights_4b: &'a [u8],
 
     /// 2. 你發明的無鎖信箱 (Lock-free Mailbox)
-    pub auto_fill_mailbox: LockFreeMailbox,
+    pub auto_fill_mailbox: crate::sync::AtomicMailboxU32,
 }
 
 #[cfg(test)]
@@ -146,7 +98,6 @@ mod tests {
         let sb = Vec101SuperBlock {
             scales: [0; 8],
             offsets: [0; 8],
-            _padding: [0; 32],
             blocks: [block1; 8],
         };
         let _ = alloc::format!("{:?}", sb);
@@ -159,6 +110,6 @@ mod tests {
 
     #[test]
     fn test_mailbox_default() {
-        let _ = LockFreeMailbox::default();
+        let _ = crate::sync::AtomicMailboxU32::default();
     }
 }

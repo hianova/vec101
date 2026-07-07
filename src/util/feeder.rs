@@ -70,7 +70,6 @@ pub fn pack_weights_to_superblocks(weights: &[i32]) -> alloc::vec::Vec<Vec101Sup
         let mut sb = Vec101SuperBlock {
             scales: [0; 8],
             offsets: [0; 8],
-            _padding: [0; 32],
             blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8],
         };
 

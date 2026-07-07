@@ -9,7 +9,7 @@ pub fn rmsnorm(x: &mut [i32], weight: &[i32], eps: i32) {
             sum_sq += (v as i64 * v as i64) >> 16;
         }
         let mean_sq = (sum_sq / hidden_dim as i64) as i32;
-        let inv_rms = rsqrt_approx_i32((mean_sq + eps) as u32);
+        let inv_rms = rsqrt_approx_i32((mean_sq + eps) as u32).unwrap_or(0);
 
         for i in 0..hidden_dim {
             let val = (chunk[i] as i64 * inv_rms as i64) >> 16;
@@ -19,7 +19,7 @@ pub fn rmsnorm(x: &mut [i32], weight: &[i32], eps: i32) {
 }
 
 pub fn silu(x: i32) -> i32 {
-    let exp_neg_x = exp_approx_q16(-x);
+    let exp_neg_x = exp_approx_q16(-x).unwrap_or(0);
     let sigmoid = ((1i64 << 16) << 16) / ((1 << 16) + exp_neg_x) as i64;
     ((x as i64 * sigmoid) >> 16) as i32
 }
@@ -37,7 +37,7 @@ pub fn gelu(x: i32) -> i32 {
     let x_cube = (x_sq * x as i64) >> 16;
     let inner = (c2 as i64 * (x as i64 + ((c1 as i64 * x_cube) >> 16))) >> 16;
     
-    let exp2 = exp_approx_q16((inner * 2) as i32);
+    let exp2 = exp_approx_q16((inner * 2) as i32).unwrap_or(0);
     let tanh = ((exp2 - (1 << 16)) as i64 * (1 << 16)) / (exp2 + (1 << 16)) as i64;
     
     (((x as i64 * ((1 << 16) + tanh)) >> 1) >> 16) as i32
@@ -68,7 +68,7 @@ pub fn attention(
 ) {
     let hidden_dim = num_heads * head_dim;
     let num_tokens = q.len() / hidden_dim;
-    let scale = rsqrt_approx_i32(head_dim as u32);
+    let scale = rsqrt_approx_i32(head_dim as u32).unwrap_or(0);
 
     for t in 0..num_tokens {
         let q_token = &q[t * hidden_dim..(t + 1) * hidden_dim];
@@ -95,7 +95,7 @@ pub fn attention(
 
             let mut sum_exp = 0i64;
             for s in &mut scores {
-                *s = exp_approx_q16(*s - max_score);
+                *s = exp_approx_q16(*s - max_score).unwrap_or(0);
                 sum_exp += *s as i64;
             }
 
@@ -126,7 +126,7 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: i32, eps: i32, out
         }
         
         let mean_sq = sum_sq / hidden_dim as i32;
-        let inv_rms = rsqrt_approx_i32((mean_sq + eps) as u32);
+        let inv_rms = rsqrt_approx_i32((mean_sq + eps) as u32).unwrap_or(0);
         let combined_scale = ((inv_rms as i64 * weight_scale as i64) >> 16) as i32;
 
         let mut max_abs_int = 0i32;

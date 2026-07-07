@@ -176,7 +176,7 @@ mod tests {
         let num_rows = 1;
         let blocks_per_row = 1;
         let mut x_stream = alloc::vec![0i8; 2048];
-        let mut w_stream = alloc::vec![Vec101SuperBlock { scales: [0; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }];
+        let mut w_stream = alloc::vec![Vec101SuperBlock { scales: [0; 8], offsets: [0; 8], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }];
         let mut s_stream = alloc::vec![1i32; 1];
         let mut out_buffer = alloc::vec![0i32; 1];
         

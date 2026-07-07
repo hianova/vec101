@@ -112,13 +112,13 @@ pub mod attention {
                         m[i] = m_i_new;
 
                         // Integer exponential approximation for scaling
-                        let exp_diff = exp_approx_q16(m_i_old - m_i_new);
+                        let exp_diff = exp_approx_q16(m_i_old - m_i_new).unwrap_or(0);
                         
                         // l[i] *= exp_diff (in Q16.16)
                         let mut l_i_new = ((l[i] as i64 * exp_diff as i64) >> FIXED_POINT_SHIFT) as i32;
 
                         for j in 0..k_len {
-                            let p = exp_approx_q16(s_ij[i * k_len + j] - m_i_new);
+                            let p = exp_approx_q16(s_ij[i * k_len + j] - m_i_new).unwrap_or(0);
                             p_ij[j] = p;
                             l_i_new += p;
                         }

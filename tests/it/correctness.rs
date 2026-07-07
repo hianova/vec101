@@ -31,7 +31,7 @@ fn test_vec101_correctness() {
     let blocks_per_row = 1; // 1 SuperBlock = 2048 features
     let total_blocks = num_rows * blocks_per_row;
 
-    let mut w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
+    let mut w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
     for super_block in &mut w_stream {
         for block in &mut super_block.blocks {
             for w in &mut block.w_pos_bits {
@@ -98,8 +98,8 @@ fn test_vec101_correctness() {
 
 #[test]
 fn test_lock_free_mailbox() {
-    use vec101::core::LockFreeMailbox;
-    let mailbox = LockFreeMailbox::new();
+    use vec101::sync::AtomicMailboxU32;
+    let mailbox = AtomicMailboxU32::new();
     assert_eq!(mailbox.try_pop(), None);
     assert_eq!(mailbox.try_push(42), Ok(()));
     assert_eq!(mailbox.try_push(24), Err(24));
@@ -136,7 +136,7 @@ fn test_ffi_c_interface() {
     let num_rows = 2;
     let blocks_per_row = 1;
     let total_blocks = num_rows * blocks_per_row;
-    let w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], _padding: [0; 32], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
+    let w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
     let x_stream = vec![0i8; batch_size * blocks_per_row * 2048];
     let s_stream = vec![1i32; num_rows];
     let mut out_actual = vec![0i32; batch_size * num_rows];

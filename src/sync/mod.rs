@@ -1,3 +1,5 @@
+pub use no_std_tool::sync::AtomicMailboxU32;
+
 #[cfg(loom)]
 pub mod loom_impl;
 #[cfg(loom)]
