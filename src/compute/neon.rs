@@ -77,7 +77,7 @@ unsafe fn process_row_neon_gemv_bit1_58(row: usize, ctx: &vec101_context) {
     }
 
     let out_ptr = ctx.out_buffer.add(row);
-    *out_ptr += ((final_sum as i64 * scale as i64) >> 16) as i32;
+    *out_ptr = (*out_ptr).saturating_add(((final_sum as i64 * scale as i64) >> 16) as i32);
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -121,7 +121,7 @@ unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
     }
     
     let out_ptr = ctx.out_buffer.add(row);
-    *out_ptr += ((final_sum as i64 * scale as i64) >> 16) as i32;
+    *out_ptr = (*out_ptr).saturating_add(((final_sum as i64 * scale as i64) >> 16) as i32);
 }
 
 #[cold]
