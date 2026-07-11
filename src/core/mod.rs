@@ -1,3 +1,5 @@
+pub mod llm_traits;
+pub use llm_traits::*;
 
 /// The fundamental compute block for vec101.
 #[repr(C)]
