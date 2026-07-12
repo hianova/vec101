@@ -16,7 +16,7 @@ gpu-metal = ["metal", "objc"]
 cuda = ["cudarc"]
 
 [dependencies]
-cudarc = { version = "0.11", optional = true, features = ["cublas"] }
+cudarc = { version = "0.11", optional = true, features = ["cublas", "nvrtc"] }
 no_std_tool = { path = "../no_std_tool" }
 
 [target.'cfg(target_os = "macos")'.dependencies]

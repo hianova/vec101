@@ -35,6 +35,8 @@ impl Vec101Backend for MetalBackend {
 /// # Safety
 /// Assumes all context pointers are valid and aligned.
 unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block], x_scale: i32) {
+    let _tracker = no_std_tool::debug::ScopedResource::new();
+
     let device = Device::system_default().expect("No Metal device found");
     let command_queue = device.new_command_queue();
     
@@ -49,7 +51,6 @@ unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block]
     let out_len = (ctx.batch_size * ctx.num_rows * core::mem::size_of::<i32>()) as u64;
     let x_len = core::mem::size_of_val(x_blocks) as u64;
     
-    // Zero-copy wrapping for large weight buffers
     let w_buffer = device.new_buffer_with_bytes_no_copy(
         ctx.w_stream as *const c_void,
         w_len,
@@ -69,7 +70,6 @@ unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block]
         None,
     );
     
-    // For x_blocks, since it's locally allocated on stack or dynamically, we can also use no_copy as long as we wait
     let x_buffer = device.new_buffer_with_bytes_no_copy(
         x_blocks.as_ptr() as *const c_void,
         x_len,
@@ -94,7 +94,6 @@ unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block]
     
     let grid_size = MTLSize::new(ctx.num_rows as u64, ctx.batch_size as u64, 1);
     
-    // Calculate threadgroup size (M-series usually max 1024, but let's use a safe value like 256 or the pipeline's max)
     let max_threads = pipeline_state.max_total_threads_per_threadgroup();
     let tg_size = if (ctx.num_rows as u64) < max_threads { ctx.num_rows as u64 } else { max_threads };
     let threadgroup_size = MTLSize::new(tg_size, 1, 1);
@@ -102,12 +101,21 @@ unsafe fn metal_compute_internal(ctx: &vec101_context, x_blocks: &[vec101_block]
     compute_encoder.dispatch_threads(grid_size, threadgroup_size);
     compute_encoder.end_encoding();
     
+    let event = device.new_shared_event();
+    command_buffer.encode_signal_event(&event, 1);
+    
     command_buffer.commit();
-    command_buffer.wait_until_completed(); // synchronous for now
+    
+    let mut backoff = no_std_tool::sync::Backoff::new();
+    while event.signaled_value() < 1 {
+        backoff.snooze();
+    }
 }
 
 #[cfg(feature = "gpu-metal")]
 unsafe fn metal_compute_q4_0_internal(ctx: &vec101_context) {
+    let _tracker = no_std_tool::debug::ScopedResource::new();
+
     let device = Device::system_default().expect("No Metal device found");
     let command_queue = device.new_command_queue();
     
@@ -174,6 +182,13 @@ unsafe fn metal_compute_q4_0_internal(ctx: &vec101_context) {
     compute_encoder.dispatch_threads(grid_size, threadgroup_size);
     compute_encoder.end_encoding();
     
+    let event = device.new_shared_event();
+    command_buffer.encode_signal_event(&event, 1);
+    
     command_buffer.commit();
-    command_buffer.wait_until_completed(); // synchronous for now
+    
+    let mut backoff = no_std_tool::sync::Backoff::new();
+    while event.signaled_value() < 1 {
+        backoff.snooze();
+    }
 }

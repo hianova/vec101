@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "no_std_tool"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ahash",
  "hashbrown",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "no_std_tool_macros"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
