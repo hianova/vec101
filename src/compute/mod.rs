@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::vec;
 
 use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
-#[cfg(any(feature = "std", loom))]
+#[cfg(feature = "std")]
 use crate::sync::spawn_thread;
 
 pub mod avx2;

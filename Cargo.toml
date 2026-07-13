@@ -24,11 +24,7 @@ no_std_tool = { path = "../no_std_tool" }
 metal = { version = "0.28", optional = true }
 objc = { version = "0.2.7", optional = true }
 
-[target.'cfg(loom)'.dependencies]
-loom = "0.7.2"
-
 [dev-dependencies]
-loom = "0.7.2"
 rand = "0.8.5"
 anyhow = "1.0"
 
@@ -36,6 +32,3 @@ anyhow = "1.0"
 name = "benchmark"
 path = "benches/benchmark.rs"
 harness = false
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

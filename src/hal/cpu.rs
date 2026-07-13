@@ -4,7 +4,7 @@ extern crate alloc;
 use alloc::vec;
 
 use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
-#[cfg(any(feature = "std", loom))]
+#[cfg(feature = "std")]
 use crate::sync::spawn_thread;
 
 use crate::compute::{avx2, neon, scalar};
@@ -67,13 +67,13 @@ impl Vec101Backend for CpuBackend {
         let num_threads = if self.num_threads == 0 { 1 } else { self.num_threads };
         let ctx_ptr = ctx as *const vec101_context as usize;
 
-        #[cfg(all(feature = "std", not(loom)))]
+        #[cfg(feature = "std")]
         let use_threads = num_threads > 1;
-        #[cfg(any(not(feature = "std"), loom))]
+        #[cfg(not(feature = "std"))]
         let use_threads = false;
 
         if use_threads {
-            #[cfg(all(feature = "std", not(loom)))]
+            #[cfg(feature = "std")]
             {
                 let row_counter = AtomicUsize::new(0);
                 std::thread::scope(|s| {

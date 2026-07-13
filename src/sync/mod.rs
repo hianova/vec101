@@ -1,16 +1,11 @@
 pub use no_std_tool::sync::AtomicMailboxU32;
 
-#[cfg(loom)]
-pub mod loom_impl;
-#[cfg(loom)]
-pub use loom_impl::*;
-
-#[cfg(all(feature = "std", not(loom)))]
+#[cfg(feature = "std")]
 pub mod std_impl;
-#[cfg(all(feature = "std", not(loom)))]
+#[cfg(feature = "std")]
 pub use std_impl::*;
 
-#[cfg(not(any(feature = "std", loom)))]
+#[cfg(not(feature = "std"))]
 pub mod no_std;
-#[cfg(not(any(feature = "std", loom)))]
+#[cfg(not(feature = "std"))]
 pub use no_std::*;
