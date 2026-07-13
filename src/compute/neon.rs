@@ -14,6 +14,8 @@ unsafe fn expand_bits_to_mask_neon(w_16: u16, bit_mask: uint8x16_t) -> int8x16_t
 }
 
 #[cfg(target_arch = "aarch64")]
+/// # Safety
+/// The caller must ensure that `row` is within bounds and `ctx` pointers are valid.
 pub unsafe fn process_row_neon_gemv(row: usize, ctx: &vec101_context) {
     if ctx.blocks_per_row == 0 { return; }
     match ctx.quant_type {
@@ -128,6 +130,8 @@ unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
 fn branch_unlikely() {}
 
 #[cfg(target_arch = "aarch64")]
+/// # Safety
+/// The caller must ensure that `row` is within bounds and `ctx` pointers are valid.
 pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
     if ctx.blocks_per_row == 0 { 
         branch_unlikely();
@@ -150,9 +154,7 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
     #[repr(align(64))]
     struct CachePaddedArray([i32; 8]); // local array to trigger cache padding detection
 
-    for b in 0..ctx.batch_size {
-        row_sums[b] = 0;
-    }
+    row_sums[..ctx.batch_size].fill(0);
 
     for col in 0..ctx.blocks_per_row {
         let block_idx = row * ctx.blocks_per_row + col;
@@ -184,7 +186,7 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
 
             let mut b_idx = 0;
             while b_idx + 3 < ctx.batch_size {
-                let ptr0 = ctx.x_stream.add((b_idx + 0) * in_features);
+                let ptr0 = ctx.x_stream.add(b_idx * in_features);
                 let ptr1 = ctx.x_stream.add((b_idx + 1) * in_features);
                 let ptr2 = ctx.x_stream.add((b_idx + 2) * in_features);
                 let ptr3 = ctx.x_stream.add((b_idx + 3) * in_features);
@@ -217,7 +219,7 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
                         w = in(vreg) w_val,
                     );
                 }
-                row_sums[b_idx + 0] += (vaddvq_s32(acc0) * micro_scale) >> 8;
+                row_sums[b_idx] += (vaddvq_s32(acc0) * micro_scale) >> 8;
                 row_sums[b_idx + 1] += (vaddvq_s32(acc1) * micro_scale) >> 8;
                 row_sums[b_idx + 2] += (vaddvq_s32(acc2) * micro_scale) >> 8;
                 row_sums[b_idx + 3] += (vaddvq_s32(acc3) * micro_scale) >> 8;
@@ -249,8 +251,8 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
         }
     }
 
-    for b in 0..ctx.batch_size {
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((row_sums[b] as i64 * scale as i64) >> 16) as i32;
+    for (b, &sum) in row_sums.iter().enumerate().take(ctx.batch_size) {
+        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((sum as i64 * scale as i64) >> 16) as i32;
     }
 }
 
@@ -258,9 +260,7 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
 unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
     let scale = *ctx.s_stream.add(row);
     
-    for b in 0..ctx.batch_size {
-        row_sums[b] = 0;
-    }
+    row_sums[..ctx.batch_size].fill(0);
     
     let q4_blocks_per_row = ctx.blocks_per_row * 8;
     let in_features = q4_blocks_per_row * 32;
@@ -280,7 +280,7 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
             let q1_u8 = vshrq_n_u8::<4>(q_vec);
             let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
             
-            let x_ptr0 = ctx.x_stream.add((b_idx + 0) * in_features + col * 32);
+            let x_ptr0 = ctx.x_stream.add(b_idx * in_features + col * 32);
             let x_ptr1 = ctx.x_stream.add((b_idx + 1) * in_features + col * 32);
             let x_ptr2 = ctx.x_stream.add((b_idx + 2) * in_features + col * 32);
             let x_ptr3 = ctx.x_stream.add((b_idx + 3) * in_features + col * 32);
@@ -321,7 +321,7 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
             );
             
             let d = w_block.d as i32;
-            row_sums[b_idx + 0] += (vaddvq_s32(acc0) * d) >> 8;
+            row_sums[b_idx] += (vaddvq_s32(acc0) * d) >> 8;
             row_sums[b_idx + 1] += (vaddvq_s32(acc1) * d) >> 8;
             row_sums[b_idx + 2] += (vaddvq_s32(acc2) * d) >> 8;
             row_sums[b_idx + 3] += (vaddvq_s32(acc3) * d) >> 8;
@@ -359,7 +359,7 @@ unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums:
         b_idx += 1;
     }
     
-    for b in 0..ctx.batch_size {
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((row_sums[b] as i64 * scale as i64) >> 16) as i32;
+    for (b, &sum) in row_sums.iter().enumerate().take(ctx.batch_size) {
+        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((sum as i64 * scale as i64) >> 16) as i32;
     }
 }

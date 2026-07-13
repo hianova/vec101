@@ -148,11 +148,11 @@ pub mod attention {
                     let l_val = l[i];
                     if l_val > 0 {
                         let out_row = &mut out_tile[i * head_dim .. (i + 1) * head_dim];
-                        for d in 0..head_dim {
+                        for item in out_row.iter_mut().take(head_dim) {
                             let scale = l_val >> FIXED_POINT_SHIFT;
                             if scale > 0 {
-                                let normalized = out_row[d] as i32 / scale;
-                                out_row[d] = normalized.clamp(-128, 127) as i8;
+                                let normalized = *item as i32 / scale;
+                                *item = normalized.clamp(-128, 127) as i8;
                             }
                         }
                     } // coverage:ignore-line

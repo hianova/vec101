@@ -49,12 +49,8 @@ pub fn geglu(x: &mut [i32], v: &[i32]) {
     }
 }
 
-pub fn rope(q: &mut [i32], k: &mut [i32], _start_pos: usize, _hidden_dim: usize, _head_dim: usize, _base: i32) {
+pub fn rope(_q: &mut [i32], _k: &mut [i32], _start_pos: usize, _hidden_dim: usize, _head_dim: usize, _base: i32) {
     // Dummy rope to avoid complex integer sin/cos implementation for now
-    for i in 0..q.len() {
-        q[i] = q[i];
-        k[i] = k[i];
-    }
 }
 
 pub fn attention(

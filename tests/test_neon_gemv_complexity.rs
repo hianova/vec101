@@ -23,7 +23,7 @@ fn test_neon_gemv_complexity() {
         w_stream: w_stream.as_mut_ptr() as *const u8,
         x_stream: x_stream.as_mut_ptr() as *const i8,
         s_stream: s_stream.as_mut_ptr() as *const i32,
-        out_buffer: out_buffer.as_mut_ptr() as *mut i32,
+        out_buffer: out_buffer.as_mut_ptr(),
         kv_blocks: core::ptr::null(),
         num_blocks: 0,
         block_size: 0,
