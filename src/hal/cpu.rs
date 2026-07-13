@@ -28,12 +28,13 @@ impl Vec101Backend for CpuBackend {
         if !is_gemm && num_threads <= 1 {
             for row in 0..ctx.num_rows {
                 // coverage:ignore-start
-                #[cfg(target_arch = "x86_64")]
-                unsafe { crate::compute::avx2::process_row_avx2_gemv(row, ctx); }
-                #[cfg(target_arch = "aarch64")]
-                unsafe { crate::compute::neon::process_row_neon_gemv(row, ctx); }
-                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                unsafe { crate::compute::scalar::process_row_scalar_gemv(row, ctx); }
+                unsafe {
+    cfg_select! {
+        target_arch = "x86_64" => crate::compute::avx2::process_row_avx2_gemv(row, ctx),
+        target_arch = "aarch64" => crate::compute::neon::process_row_neon_gemv(row, ctx),
+        _ => crate::compute::scalar::process_row_scalar_gemv(row, ctx),
+    }
+}
 // coverage:ignore-end
             }
             return;
@@ -78,7 +79,7 @@ impl Vec101Backend for CpuBackend {
                 std::thread::scope(|s| {
                     for _ in 0..(num_threads - 1) {
                         #[cfg(not(target_arch = "aarch64"))]
-                        let x_t_ref = &x_t;
+                        let x_t_ref = &x_t_arc;
                         let rc_ref = &row_counter;
                         
                         std::thread::Builder::new().spawn_scoped(s, move || {
@@ -90,12 +91,13 @@ impl Vec101Backend for CpuBackend {
                                 if row >= thread_ctx.num_rows { break; }
                                 if is_gemm {
                                     // coverage:ignore-start
-                                    #[cfg(target_arch = "x86_64")]
-                                    unsafe { crate::compute::avx2::process_row_avx2_gemm(row, thread_ctx, x_t_ref, padded_batch, &mut t_row_sums) };
-                                    #[cfg(target_arch = "aarch64")]
-                                    unsafe { crate::compute::neon::process_row_neon_gemm(row, thread_ctx, &mut t_row_sums) };
-                                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                                    unsafe { crate::compute::scalar::process_row_scalar_gemm(row, thread_ctx, x_t_ref, padded_batch, &mut t_row_sums) };
+                                    unsafe {
+    cfg_select! {
+        target_arch = "x86_64" => crate::compute::avx2::process_row_avx2_gemm(row, thread_ctx, x_t_ref, padded_batch, &mut t_row_sums) ,
+        target_arch = "aarch64" => crate::compute::neon::process_row_neon_gemm(row, thread_ctx, &mut t_row_sums) ,
+        _ => crate::compute::scalar::process_row_scalar_gemm(row, thread_ctx, x_t_ref, padded_batch, &mut t_row_sums) ,
+    }
+}
 // coverage:ignore-end
                                 } else {
                                     // coverage:ignore-start
@@ -117,21 +119,22 @@ impl Vec101Backend for CpuBackend {
                         if row >= ctx.num_rows { break; }
                         if is_gemm {
                             // coverage:ignore-start
-                            #[cfg(target_arch = "x86_64")]
-                            unsafe { crate::compute::avx2::process_row_avx2_gemm(row, ctx, &x_t, padded_batch, &mut row_sums); }
-                            #[cfg(target_arch = "aarch64")]
-                            unsafe { crate::compute::neon::process_row_neon_gemm(row, ctx, &mut row_sums); }
-                            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                            unsafe { crate::compute::scalar::process_row_scalar_gemm(row, ctx, &x_t, padded_batch, &mut row_sums); }
-// coverage:ignore-end
+                            unsafe {
+    cfg_select! {
+        target_arch = "x86_64" => crate::compute::avx2::process_row_avx2_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums),
+        target_arch = "aarch64" => crate::compute::neon::process_row_neon_gemm(row, ctx, &mut row_sums),
+        _ => crate::compute::scalar::process_row_scalar_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums),
+    }
+}// coverage:ignore-end
                         } else {
                             // coverage:ignore-start
-                            #[cfg(target_arch = "x86_64")]
-                            unsafe { crate::compute::avx2::process_row_avx2_gemv(row, ctx); }
-                            #[cfg(target_arch = "aarch64")]
-                            unsafe { crate::compute::neon::process_row_neon_gemv(row, ctx); }
-                            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                            unsafe { crate::compute::scalar::process_row_scalar_gemv(row, ctx); }
+                            unsafe {
+    cfg_select! {
+        target_arch = "x86_64" => crate::compute::avx2::process_row_avx2_gemv(row, ctx),
+        target_arch = "aarch64" => crate::compute::neon::process_row_neon_gemv(row, ctx),
+        _ => crate::compute::scalar::process_row_scalar_gemv(row, ctx),
+    }
+}
 // coverage:ignore-end
                         }
                     }
@@ -142,20 +145,21 @@ impl Vec101Backend for CpuBackend {
             for row in 0..ctx.num_rows {
                 if is_gemm {
                     // coverage:ignore-start
-                    #[cfg(target_arch = "x86_64")]
-                    unsafe { crate::compute::avx2::process_row_avx2_gemm(row, ctx, &x_t, padded_batch, &mut row_sums); }
-                    #[cfg(target_arch = "aarch64")]
-                    unsafe { crate::compute::neon::process_row_neon_gemm(row, ctx, &mut row_sums); }
-                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                    unsafe { crate::compute::scalar::process_row_scalar_gemm(row, ctx, &x_t, padded_batch, &mut row_sums); }
-// coverage:ignore-end
+                    unsafe {
+    cfg_select! {
+        target_arch = "x86_64" => crate::compute::avx2::process_row_avx2_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums),
+        target_arch = "aarch64" => crate::compute::neon::process_row_neon_gemm(row, ctx, &mut row_sums),
+        _ => crate::compute::scalar::process_row_scalar_gemm(row, ctx, &x_t_arc, padded_batch, &mut row_sums),
+    }
+}// coverage:ignore-end
                 } else {
-                    #[cfg(target_arch = "x86_64")]
-                    unsafe { crate::compute::avx2::process_row_avx2_gemv(row, ctx); }
-                    #[cfg(target_arch = "aarch64")]
-                    unsafe { crate::compute::neon::process_row_neon_gemv(row, ctx); } // coverage:ignore-line
-                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                    unsafe { crate::compute::scalar::process_row_scalar_gemv(row, ctx); }
+                    unsafe {
+    cfg_select! {
+        target_arch = "x86_64" => crate::compute::avx2::process_row_avx2_gemv(row, ctx),
+        target_arch = "aarch64" => crate::compute::neon::process_row_neon_gemv(row, ctx),
+        _ => crate::compute::scalar::process_row_scalar_gemv(row, ctx),
+    }
+}
                 }
             }
         }

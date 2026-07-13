@@ -52,7 +52,6 @@ fn run_engine_benchmark(
         Vec101SuperBlock {
             scales: [1; 8],
             offsets: [0; 8],
-            _padding: [0; 32],
             blocks: [vec101_block {
                 w_pos_bits: [0; 4],
                 w_neg_bits: [0; 4]

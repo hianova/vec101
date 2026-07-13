@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "no_std_tool"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ahash",
  "hashbrown",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "no_std_tool_macros"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -593,7 +593,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vec101"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "cudarc",
