@@ -94,7 +94,7 @@ impl Vec101Backend for CpuBackend {
                         std::thread::Builder::new().spawn_scoped(s, move || {
                             let thread_ctx = unsafe { &*(ctx_ptr as *const vec101_context) };
                             let mut t_row_sums = vec![0i32; padded_batch];
-                            
+
                             loop {
                                 let row = rc_ref.fetch_add(1, Ordering::Relaxed);
                                 if row >= thread_ctx.num_rows { break; }
