@@ -1,5 +1,5 @@
 #![allow(unused)]
-use vec101::{vec101_context, core::QuantType, core::Vec101SuperBlock};
+use vec101::{core::QuantType, core::Vec101SuperBlock, vec101_context};
 
 #[test]
 #[cfg(target_arch = "aarch64")]
@@ -10,9 +10,9 @@ fn test_neon_gemv_complexity() {
         .unwrap_or(10);
 
     let blocks_per_row = n;
-    
+
     let batch_size = 5;
-    
+
     let mut w_stream = vec![0u8; blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()];
     let mut x_stream = vec![0i8; blocks_per_row * 2048 * batch_size];
     let mut s_stream = vec![1i32; 1];

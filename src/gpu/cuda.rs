@@ -136,51 +136,116 @@ impl CudaBackend {
 impl Vec101Backend for CudaBackend {
     fn compute(&self, ctx: &vec101_context) {
         let ptx = compile_ptx(CUDA_SOURCE).expect("Failed to compile CUDA PTX");
-        self.device.load_ptx(ptx, "vec101_module", &["vec101_gemv", "vec101_gemv_q4_0"]).expect("Failed to load PTX");
+        self.device
+            .load_ptx(ptx, "vec101_module", &["vec101_gemv", "vec101_gemv_q4_0"])
+            .expect("Failed to load PTX");
 
         if ctx.quant_type == crate::core::QuantType::Bit1_58 {
             let num_micro = ctx.blocks_per_row * 8;
             let mut x_blocks = alloc::vec![crate::core::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; num_micro * ctx.batch_size];
-            let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256) };
+            let x_slice = unsafe {
+                core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * num_micro * 256)
+            };
             let x_scale = crate::util::ops::quantize_to_ternary(x_slice, &mut x_blocks);
 
-            let w_len = ctx.num_rows * ctx.blocks_per_row * core::mem::size_of::<crate::core::Vec101SuperBlock>();
+            let w_len = ctx.num_rows
+                * ctx.blocks_per_row
+                * core::mem::size_of::<crate::core::Vec101SuperBlock>();
             let s_len = ctx.num_rows * core::mem::size_of::<i32>();
             let out_len = ctx.batch_size * ctx.num_rows * core::mem::size_of::<i32>();
-            
-            let dev_w = self.device.htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.w_stream, w_len) }).unwrap();
-            let dev_x = self.device.htod_sync_copy(unsafe { core::slice::from_raw_parts(x_blocks.as_ptr() as *const u8, x_blocks.len() * core::mem::size_of::<crate::core::vec101_block>()) }).unwrap();
-            let dev_s = self.device.htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.s_stream as *const u8, s_len) }).unwrap();
+
+            let dev_w = self
+                .device
+                .htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.w_stream, w_len) })
+                .unwrap();
+            let dev_x = self
+                .device
+                .htod_sync_copy(unsafe {
+                    core::slice::from_raw_parts(
+                        x_blocks.as_ptr() as *const u8,
+                        x_blocks.len() * core::mem::size_of::<crate::core::vec101_block>(),
+                    )
+                })
+                .unwrap();
+            let dev_s = self
+                .device
+                .htod_sync_copy(unsafe {
+                    core::slice::from_raw_parts(ctx.s_stream as *const u8, s_len)
+                })
+                .unwrap();
             let mut dev_out = self.device.alloc_zeros::<u8>(out_len).unwrap();
 
-            let func = self.device.get_func("vec101_module", "vec101_gemv").unwrap();
+            let func = self
+                .device
+                .get_func("vec101_module", "vec101_gemv")
+                .unwrap();
             let cfg = LaunchConfig {
                 grid_dim: (ctx.num_rows as u32, ctx.batch_size as u32, 1),
                 block_dim: (1, 1, 1),
                 shared_mem_bytes: 0,
             };
 
-            unsafe { func.launch(cfg, (&dev_w, &dev_x, &dev_s, &mut dev_out, ctx.blocks_per_row as u32, x_scale as f32, ctx.num_rows as u32)) }.unwrap();
-            
             unsafe {
-                self.device.dtoh_sync_copy_into(&dev_out, core::slice::from_raw_parts_mut(ctx.out_buffer as *mut u8, out_len)).unwrap();
+                func.launch(
+                    cfg,
+                    (
+                        &dev_w,
+                        &dev_x,
+                        &dev_s,
+                        &mut dev_out,
+                        ctx.blocks_per_row as u32,
+                        x_scale as f32,
+                        ctx.num_rows as u32,
+                    ),
+                )
             }
+            .unwrap();
 
+            unsafe {
+                self.device
+                    .dtoh_sync_copy_into(
+                        &dev_out,
+                        core::slice::from_raw_parts_mut(ctx.out_buffer as *mut u8, out_len),
+                    )
+                    .unwrap();
+            }
         } else if ctx.quant_type == crate::core::QuantType::Q4_0 {
             let q4_blocks_per_row = ctx.blocks_per_row * 8;
-            let w_len = ctx.num_rows * q4_blocks_per_row * core::mem::size_of::<crate::core::BlockQ4_0>();
+            let w_len =
+                ctx.num_rows * q4_blocks_per_row * core::mem::size_of::<crate::core::BlockQ4_0>();
             let s_len = ctx.num_rows * core::mem::size_of::<i32>();
             let out_len = ctx.batch_size * ctx.num_rows * core::mem::size_of::<i32>();
             let x_len = ctx.batch_size * q4_blocks_per_row * 32 * core::mem::size_of::<i8>();
 
-            let dev_w = self.device.htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.w_stream, w_len) }).unwrap();
-            let dev_x = self.device.htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.x_stream as *const u8, x_len) }).unwrap();
-            let dev_s = self.device.htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.s_stream as *const u8, s_len) }).unwrap();
+            let dev_w = self
+                .device
+                .htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.w_stream, w_len) })
+                .unwrap();
+            let dev_x = self
+                .device
+                .htod_sync_copy(unsafe {
+                    core::slice::from_raw_parts(ctx.x_stream as *const u8, x_len)
+                })
+                .unwrap();
+            let dev_s = self
+                .device
+                .htod_sync_copy(unsafe {
+                    core::slice::from_raw_parts(ctx.s_stream as *const u8, s_len)
+                })
+                .unwrap();
             let mut dev_out = self.device.alloc_zeros::<u8>(out_len).unwrap();
 
-            self.device.htod_sync_copy_into(unsafe { core::slice::from_raw_parts(ctx.out_buffer as *const u8, out_len) }, &mut dev_out).unwrap();
+            self.device
+                .htod_sync_copy_into(
+                    unsafe { core::slice::from_raw_parts(ctx.out_buffer as *const u8, out_len) },
+                    &mut dev_out,
+                )
+                .unwrap();
 
-            let func = self.device.get_func("vec101_module", "vec101_gemv_q4_0").unwrap();
+            let func = self
+                .device
+                .get_func("vec101_module", "vec101_gemv_q4_0")
+                .unwrap();
             let cfg = LaunchConfig {
                 grid_dim: (ctx.num_rows as u32, ctx.batch_size as u32, 1),
                 block_dim: (1, 1, 1),
@@ -188,10 +253,29 @@ impl Vec101Backend for CudaBackend {
             };
 
             let x_scale = 1.0f32;
-            unsafe { func.launch(cfg, (&dev_w, &dev_x, &dev_s, &mut dev_out, ctx.blocks_per_row as u32, x_scale, ctx.num_rows as u32)) }.unwrap();
-            
             unsafe {
-                self.device.dtoh_sync_copy_into(&dev_out, core::slice::from_raw_parts_mut(ctx.out_buffer as *mut u8, out_len)).unwrap();
+                func.launch(
+                    cfg,
+                    (
+                        &dev_w,
+                        &dev_x,
+                        &dev_s,
+                        &mut dev_out,
+                        ctx.blocks_per_row as u32,
+                        x_scale,
+                        ctx.num_rows as u32,
+                    ),
+                )
+            }
+            .unwrap();
+
+            unsafe {
+                self.device
+                    .dtoh_sync_copy_into(
+                        &dev_out,
+                        core::slice::from_raw_parts_mut(ctx.out_buffer as *mut u8, out_len),
+                    )
+                    .unwrap();
             }
         }
     }

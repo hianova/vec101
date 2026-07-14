@@ -1,5 +1,5 @@
+use vec101::core::{BlockQ4_0, Vec101SuperBlock};
 use vec101::{vec101_block, vec101_compute, vec101_context};
-use vec101::core::{Vec101SuperBlock, BlockQ4_0};
 
 use crate::common::{XorShift32, naive_fp32_compute, naive_q4_0_compute};
 
@@ -31,7 +31,17 @@ fn test_vec101_correctness() {
     let blocks_per_row = 1; // 1 SuperBlock = 2048 features
     let total_blocks = num_rows * blocks_per_row;
 
-    let mut w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
+    let mut w_stream = vec![
+        Vec101SuperBlock {
+            scales: [128; 8],
+            offsets: [0; 8],
+            blocks: [vec101_block {
+                w_pos_bits: [0; 4],
+                w_neg_bits: [0; 4]
+            }; 8]
+        };
+        total_blocks
+    ];
     for super_block in &mut w_stream {
         for block in &mut super_block.blocks {
             for w in &mut block.w_pos_bits {
@@ -93,7 +103,12 @@ fn test_vec101_correctness() {
     let threshold = 0.75;
     #[cfg(not(feature = "gpu-metal"))]
     let threshold = 0.99;
-    assert!(sim > threshold, "Similarity {} is below threshold {}", sim, threshold);
+    assert!(
+        sim > threshold,
+        "Similarity {} is below threshold {}",
+        sim,
+        threshold
+    );
 }
 
 #[test]
@@ -130,13 +145,23 @@ fn test_ffi_c_interface() {
     unsafe {
         vec101_compute_c(std::ptr::null());
     }
-    
+
     // Also test with a real context
     let batch_size = 1;
     let num_rows = 2;
     let blocks_per_row = 1;
     let total_blocks = num_rows * blocks_per_row;
-    let w_stream = vec![Vec101SuperBlock { scales: [128; 8], offsets: [0; 8], blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8] }; total_blocks];
+    let w_stream = vec![
+        Vec101SuperBlock {
+            scales: [128; 8],
+            offsets: [0; 8],
+            blocks: [vec101_block {
+                w_pos_bits: [0; 4],
+                w_neg_bits: [0; 4]
+            }; 8]
+        };
+        total_blocks
+    ];
     let x_stream = vec![0i8; batch_size * blocks_per_row * 2048];
     let s_stream = vec![1i32; num_rows];
     let mut out_actual = vec![0i32; batch_size * num_rows];
@@ -183,7 +208,13 @@ fn test_vec101_q4_0_correctness() {
     let q4_blocks_per_row = blocks_per_row * 8;
     let total_q4_blocks = num_rows * q4_blocks_per_row;
 
-    let mut w_stream = vec![BlockQ4_0 { d: 128, qs: [0; 16] }; total_q4_blocks];
+    let mut w_stream = vec![
+        BlockQ4_0 {
+            d: 128,
+            qs: [0; 16]
+        };
+        total_q4_blocks
+    ];
     for block in &mut w_stream {
         block.d = 128;
         for q in &mut block.qs {
@@ -239,7 +270,12 @@ fn test_vec101_q4_0_correctness() {
     let sim = cosine_similarity(&out_expected, &out_actual);
     println!("Q4_0 Cosine Similarity: {}", sim);
     let threshold = 0.99;
-    assert!(sim > threshold, "Q4_0 Similarity {} is below threshold {}", sim, threshold);
+    assert!(
+        sim > threshold,
+        "Q4_0 Similarity {} is below threshold {}",
+        sim,
+        threshold
+    );
 }
 
 #[test]
@@ -251,7 +287,13 @@ fn test_vec101_q4_0_correctness_gemv() {
     let q4_blocks_per_row = blocks_per_row * 8;
     let total_q4_blocks = num_rows * q4_blocks_per_row;
 
-    let mut w_stream = vec![BlockQ4_0 { d: 128, qs: [0; 16] }; total_q4_blocks];
+    let mut w_stream = vec![
+        BlockQ4_0 {
+            d: 128,
+            qs: [0; 16]
+        };
+        total_q4_blocks
+    ];
     for block in &mut w_stream {
         block.d = 128;
         for q in &mut block.qs {
@@ -307,5 +349,10 @@ fn test_vec101_q4_0_correctness_gemv() {
     let sim = cosine_similarity(&out_expected, &out_actual);
     println!("Q4_0 GEMV Cosine Similarity: {}", sim);
     let threshold = 0.99;
-    assert!(sim > threshold, "Q4_0 GEMV Similarity {} is below threshold {}", sim, threshold);
+    assert!(
+        sim > threshold,
+        "Q4_0 GEMV Similarity {} is below threshold {}",
+        sim,
+        threshold
+    );
 }

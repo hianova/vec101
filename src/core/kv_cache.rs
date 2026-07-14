@@ -18,9 +18,7 @@ impl Default for SharedPrefixManager {
 
 impl SharedPrefixManager {
     pub fn new() -> Self {
-        Self {
-            blocks: Vec::new(),
-        }
+        Self { blocks: Vec::new() }
     }
 
     /// Inserts a block into the manager, returning a unique block_id.

@@ -1,6 +1,6 @@
-use crate::core::vec101_context;
 use crate::core::QuantType;
 use crate::core::engine::Vec101Engine;
+use crate::core::vec101_context;
 use core::ptr;
 
 pub struct ComputeContextBuilder {

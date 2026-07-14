@@ -14,12 +14,15 @@ impl Vec101Engine {
         // 2. Setup the x_stream for the batch
         // 3. Dispatch the batched GEMM compute via `self.compute()`
         // 4. Decode the resulting tokens back to strings in parallel
-        
+
         // Mock parallel tokenization and decoding steps to demonstrate rayon usage.
-        let tokenized: Vec<_> = prompts.par_iter().map(|p| {
-            // Mock tokenization
-            p.len()
-        }).collect();
+        let tokenized: Vec<_> = prompts
+            .par_iter()
+            .map(|p| {
+                // Mock tokenization
+                p.len()
+            })
+            .collect();
 
         // Normally we'd update self.ctx.batch_size and execute self.compute() here.
         // For demonstration, we'll just run it.
@@ -27,10 +30,13 @@ impl Vec101Engine {
         self.compute();
 
         // Mock decoding
-        let results: Vec<String> = tokenized.par_iter().map(|&len| {
-            // Mock output generation based on compute results
-            alloc::format!("Generated output for prompt of length {}", len)
-        }).collect();
+        let results: Vec<String> = tokenized
+            .par_iter()
+            .map(|&len| {
+                // Mock output generation based on compute results
+                alloc::format!("Generated output for prompt of length {}", len)
+            })
+            .collect();
 
         results
     }

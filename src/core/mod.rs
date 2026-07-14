@@ -28,18 +28,16 @@ pub struct Vec101SuperBlock {
     pub scales: [i16; 8],
     pub offsets: [i16; 8],
     // 其餘 8 個 Cache Line：存放實際的 bit 流 (每列對應一個 Block)
-    pub blocks: [vec101_block; 8], 
+    pub blocks: [vec101_block; 8],
 }
 
 /// Gemma Q4_0 Block (32 weights packed into 16 bytes + 1 f16 scale = 18 bytes)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ4_0 {
-    pub d: i16,           // Block Scale (Delta)
-    pub qs: [u8; 16],     // 32 個 4-bit 權重打包
+    pub d: i16,       // Block Scale (Delta)
+    pub qs: [u8; 16], // 32 個 4-bit 權重打包
 }
-
-
 
 /// Supported quantization types for Dual Engine
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +88,7 @@ unsafe impl Sync for vec101_context {}
 /// The Heterogeneous Compute Hub interface (Dual Engine)
 pub struct DualEngineContext<'a> {
     /// 1. 唯一的一份物理記憶體映射 (Zero-copy)
-    pub shared_kv_cache: &'a mut [u8], 
+    pub shared_kv_cache: &'a mut [u8],
     pub shared_weights_1_58b: &'a [u8],
     pub shared_weights_4b: &'a [u8],
 
@@ -104,7 +102,10 @@ mod tests {
 
     #[test]
     fn test_core_structs_debug() {
-        let block1 = vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] };
+        let block1 = vec101_block {
+            w_pos_bits: [0; 4],
+            w_neg_bits: [0; 4],
+        };
         let _ = alloc::format!("{:?}", block1);
 
         let sb = Vec101SuperBlock {
@@ -116,7 +117,7 @@ mod tests {
 
         let q4 = BlockQ4_0 { d: 0, qs: [0; 16] };
         let _ = alloc::format!("{:?}", q4);
-        
+
         let _ = alloc::format!("{:?}", QuantType::Bit1_58);
     }
 

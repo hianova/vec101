@@ -13,9 +13,7 @@ impl<const K: usize> Default for TopK<K> {
 
 impl<const K: usize> TopK<K> {
     pub fn new() -> Self {
-        Self {
-            items: [None; K],
-        }
+        Self { items: [None; K] }
     }
 
     /// Add a new item to the TopK structure, maintaining the top K elements.

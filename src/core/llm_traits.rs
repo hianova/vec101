@@ -18,9 +18,9 @@ pub trait LlmLayer<W: WeightProvider> {
     type Error;
 
     /// Executes the forward pass for this layer.
-    /// 
+    ///
     /// All buffers must be pre-allocated by the caller to ensure `no_std` compatibility.
-    /// 
+    ///
     /// - `layer_id`: The index of this layer.
     /// - `weights`: The weight provider to fetch projection weights.
     /// - `hidden_states`: The in/out feature vector for the sequence.
@@ -48,7 +48,7 @@ pub trait LlmPipeline<W: WeightProvider, L: LlmLayer<W>> {
     /// - `weights`: The weight provider.
     /// - `kv_cache`: The global KV cache (must be sliced/managed by the implementation for each layer).
     /// - `scratch_buffer`: A temporary working buffer for intermediate states (e.g. logits).
-    /// 
+    ///
     /// Returns a slice to the computed logits, which will be inside the `scratch_buffer` or another pre-allocated area.
     fn generate_step<'a>(
         &self,

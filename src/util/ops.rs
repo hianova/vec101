@@ -36,10 +36,10 @@ pub fn gelu(x: i32) -> i32 {
     let x_sq = (x as i64 * x as i64) >> 16;
     let x_cube = (x_sq * x as i64) >> 16;
     let inner = (c2 as i64 * (x as i64 + ((c1 as i64 * x_cube) >> 16))) >> 16;
-    
+
     let exp2 = exp_approx_q16((inner * 2) as i32).unwrap_or(0);
     let tanh = ((exp2 - (1 << 16)) as i64 * (1 << 16)) / (exp2 + (1 << 16)) as i64;
-    
+
     (((x as i64 * ((1 << 16) + tanh)) >> 1) >> 16) as i32
 }
 
@@ -49,7 +49,14 @@ pub fn geglu(x: &mut [i32], v: &[i32]) {
     }
 }
 
-pub fn rope(_q: &mut [i32], _k: &mut [i32], _start_pos: usize, _hidden_dim: usize, _head_dim: usize, _base: i32) {
+pub fn rope(
+    _q: &mut [i32],
+    _k: &mut [i32],
+    _start_pos: usize,
+    _hidden_dim: usize,
+    _head_dim: usize,
+    _base: i32,
+) {
     // Dummy rope to avoid complex integer sin/cos implementation for now
 }
 
@@ -73,7 +80,7 @@ pub fn attention(
 
         for h in 0..num_heads {
             let q_head = &q_token[h * head_dim..(h + 1) * head_dim];
-            
+
             let mut scores = alloc::vec![0i32; seq_len];
             for seq_idx in 0..seq_len {
                 let k_head = &k_cache[seq_idx][h * head_dim..(h + 1) * head_dim];
@@ -86,7 +93,9 @@ pub fn attention(
 
             let mut max_score = i32::MIN;
             for &s in &scores {
-                if s > max_score { max_score = s; }
+                if s > max_score {
+                    max_score = s;
+                }
             }
 
             let mut sum_exp = 0i64;
@@ -101,7 +110,7 @@ pub fn attention(
 
             let out_head = &mut out_token[h * head_dim..(h + 1) * head_dim];
             out_head.fill(0);
-            
+
             for seq_idx in 0..seq_len {
                 let v_head = &v_cache[seq_idx][h * head_dim..(h + 1) * head_dim];
                 let score = scores[seq_idx];
@@ -113,14 +122,25 @@ pub fn attention(
     }
 }
 
-pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: i32, eps: i32, out_q: &mut [i8], out_scales: &mut [i32]) {
+pub fn rmsnorm_int8(
+    q: &[i8],
+    weight_i8: &[i8],
+    weight_scale: i32,
+    eps: i32,
+    out_q: &mut [i8],
+    out_scales: &mut [i32],
+) {
     let hidden_dim = weight_i8.len();
-    for (t, (in_chunk, out_chunk)) in q.chunks(hidden_dim).zip(out_q.chunks_mut(hidden_dim)).enumerate() {
+    for (t, (in_chunk, out_chunk)) in q
+        .chunks(hidden_dim)
+        .zip(out_q.chunks_mut(hidden_dim))
+        .enumerate()
+    {
         let mut sum_sq = 0i32;
         for &v in in_chunk {
             sum_sq += (v as i32) * (v as i32);
         }
-        
+
         let mean_sq = sum_sq / hidden_dim as i32;
         let inv_rms = rsqrt_approx_i32((mean_sq + eps) as u32).unwrap_or(0);
         let combined_scale = ((inv_rms as i64 * weight_scale as i64) >> 16) as i32;
@@ -129,13 +149,23 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: i32, eps: i32, out
         for i in 0..hidden_dim {
             let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
             let abs = prod.abs();
-            if abs > max_abs_int { max_abs_int = abs; }
+            if abs > max_abs_int {
+                max_abs_int = abs;
+            }
         }
 
         let max_out = (max_abs_int as i64 * combined_scale as i64) >> 16;
-        let out_scale = if max_out == 0 { 1 } else { (max_out / 127) as i32 };
-        
-        let multiplier = if out_scale == 0 { 0 } else { ((combined_scale as i64) << 16) / out_scale as i64 };
+        let out_scale = if max_out == 0 {
+            1
+        } else {
+            (max_out / 127) as i32
+        };
+
+        let multiplier = if out_scale == 0 {
+            0
+        } else {
+            ((combined_scale as i64) << 16) / out_scale as i64
+        };
 
         for i in 0..hidden_dim {
             let prod = (in_chunk[i] as i32) * (weight_i8[i] as i32);
@@ -148,26 +178,47 @@ pub fn rmsnorm_int8(q: &[i8], weight_i8: &[i8], weight_scale: i32, eps: i32, out
     }
 }
 
-pub fn swiglu_int8(q: &[i8], in_scales: &[i32], v_weight_i8: &[i8], v_weight_scale: i32, out_q: &mut [i8], out_scales: &mut [i32]) {
+pub fn swiglu_int8(
+    q: &[i8],
+    in_scales: &[i32],
+    v_weight_i8: &[i8],
+    v_weight_scale: i32,
+    out_q: &mut [i8],
+    out_scales: &mut [i32],
+) {
     let hidden_dim = v_weight_i8.len();
-    for (t, (in_chunk, out_chunk)) in q.chunks(hidden_dim).zip(out_q.chunks_mut(hidden_dim)).enumerate() {
+    for (t, (in_chunk, out_chunk)) in q
+        .chunks(hidden_dim)
+        .zip(out_q.chunks_mut(hidden_dim))
+        .enumerate()
+    {
         let s = in_scales[t];
-        
+
         let mut max_abs_int = 0i32;
         for i in 0..hidden_dim {
             let x_val = in_chunk[i];
             let x_fixed = x_val as i32 * s;
-            let l_val = silu(x_fixed) >> 8; 
+            let l_val = silu(x_fixed) >> 8;
             let v_val = v_weight_i8[i] as i32;
             let prod = l_val * v_val;
             let abs = prod.abs();
-            if abs > max_abs_int { max_abs_int = abs; }
+            if abs > max_abs_int {
+                max_abs_int = abs;
+            }
         }
-        
+
         let combined_scale = v_weight_scale;
         let max_out = (max_abs_int as i64 * combined_scale as i64) >> 16;
-        let out_scale = if max_out == 0 { 1 } else { (max_out / 127) as i32 };
-        let multiplier = if out_scale == 0 { 0 } else { ((combined_scale as i64) << 16) / out_scale as i64 };
+        let out_scale = if max_out == 0 {
+            1
+        } else {
+            (max_out / 127) as i32
+        };
+        let multiplier = if out_scale == 0 {
+            0
+        } else {
+            ((combined_scale as i64) << 16) / out_scale as i64
+        };
 
         for i in 0..hidden_dim {
             let x_val = in_chunk[i];
@@ -175,12 +226,12 @@ pub fn swiglu_int8(q: &[i8], in_scales: &[i32], v_weight_i8: &[i8], v_weight_sca
             let l_val = silu(x_fixed) >> 8;
             let v_val = v_weight_i8[i] as i32;
             let prod = l_val * v_val;
-            
+
             let mut quantized = ((prod as i64 * multiplier) >> 31) as i32;
             quantized = quantized.clamp(-128, 127);
             out_chunk[i] = quantized as i8;
         }
-        
+
         out_scales[t] = out_scale;
     }
 }
@@ -192,7 +243,11 @@ pub fn quantize_to_ternary(x_i8: &[i8], blocks: &mut [vec101_block]) -> i32 {
     for &v in x_i8 {
         sum_abs += (v as i64).abs();
     }
-    let scale = if x_i8.is_empty() { 0 } else { (sum_abs / x_i8.len() as i64) as i32 };
+    let scale = if x_i8.is_empty() {
+        0
+    } else {
+        (sum_abs / x_i8.len() as i64) as i32
+    };
 
     for (i, chunk) in x_i8.chunks_exact(256).enumerate() {
         let mut pos = [0u64; 4];
@@ -200,7 +255,7 @@ pub fn quantize_to_ternary(x_i8: &[i8], blocks: &mut [vec101_block]) -> i32 {
         for k in 0..4 {
             let mut p_bits = 0u64;
             let mut n_bits = 0u64;
-            let sub_chunk = &chunk[k * 64 .. (k + 1) * 64];
+            let sub_chunk = &chunk[k * 64..(k + 1) * 64];
             for (j, &v) in sub_chunk.iter().enumerate() {
                 if v > 0 {
                     p_bits |= 1 << j;
@@ -305,10 +360,16 @@ mod tests {
     #[test]
     fn test_quantize_to_ternary() {
         let x_i8 = vec![1; 256];
-        let mut blocks = vec![crate::core::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 1];
+        let mut blocks = vec![
+            crate::core::vec101_block {
+                w_pos_bits: [0; 4],
+                w_neg_bits: [0; 4]
+            };
+            1
+        ];
         let scale = quantize_to_ternary(&x_i8, &mut blocks);
         assert_eq!(scale, 1);
-        
+
         let empty_i8: Vec<i8> = vec![];
         let mut empty_blocks = vec![];
         let scale2 = quantize_to_ternary(&empty_i8, &mut empty_blocks);
@@ -318,7 +379,13 @@ mod tests {
         let mut mixed = vec![0; 256];
         mixed[0] = 1;
         mixed[1] = -1;
-        let mut blocks2 = vec![crate::core::vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 1];
+        let mut blocks2 = vec![
+            crate::core::vec101_block {
+                w_pos_bits: [0; 4],
+                w_neg_bits: [0; 4]
+            };
+            1
+        ];
         quantize_to_ternary(&mixed, &mut blocks2);
         assert_eq!(blocks2[0].w_pos_bits[0] & 1, 1);
         assert_eq!(blocks2[0].w_neg_bits[0] & 2, 2);

@@ -1,5 +1,5 @@
-use crate::core::vec101_context;
 use crate::compute::vec101_compute;
+use crate::core::vec101_context;
 
 /// C-ABI compatible interface to execute the vec101 core engine.
 /// This allows GPU runtimes (like Metal or CUDA) to reuse the compute loop,

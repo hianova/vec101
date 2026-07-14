@@ -1,5 +1,5 @@
-use crate::core::vec101_context;
 use crate::compute::vec101_compute;
+use crate::core::vec101_context;
 use alloc::vec::Vec;
 use core::ptr;
 
@@ -13,10 +13,14 @@ impl Vec101Engine {
     pub(crate) fn new(mut ctx: vec101_context) -> Self {
         // Output buffer size is batch_size * num_rows for a full forward pass
         // If num_rows is 0, we'll just allocate a small buffer to avoid issues
-        let out_size = if ctx.batch_size * ctx.num_rows == 0 { 1 } else { ctx.batch_size * ctx.num_rows };
+        let out_size = if ctx.batch_size * ctx.num_rows == 0 {
+            1
+        } else {
+            ctx.batch_size * ctx.num_rows
+        };
         let mut out_buffer_owner = alloc::vec![0; out_size];
         ctx.out_buffer = out_buffer_owner.as_mut_ptr();
-        
+
         let mut kv_blocks_owner = alloc::vec![ptr::null(); ctx.num_blocks];
         ctx.kv_blocks = kv_blocks_owner.as_ptr();
 

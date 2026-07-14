@@ -11,11 +11,11 @@
 
 extern crate alloc;
 
-pub mod sync;
-pub mod core;
 pub mod compute;
-pub mod hal;
+pub mod core;
 pub mod gpu;
+pub mod hal;
+pub mod sync;
 
 pub mod util;
 
@@ -24,8 +24,7 @@ pub use util::components::{attention, tokenizer};
 #[cfg(feature = "std")]
 pub mod react;
 
-
 pub use compute::vec101_compute;
-pub use no_std_tool::debug::{check_memory_leaks, check_thread_drops, ScopedResource};
 pub use core::{vec101_block, vec101_context};
+pub use no_std_tool::debug::{ScopedResource, check_memory_leaks, check_thread_drops};
 pub use util::ffi::vec101_compute_c;

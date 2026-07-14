@@ -1,7 +1,7 @@
-use std::process::Command;
+use crate::core::Vec101Engine;
 use std::env;
 use std::fs;
-use crate::core::Vec101Engine;
+use std::process::Command;
 
 pub trait Vec101EngineReactExt {
     /// Generates a bash script via the engine and executes it.
@@ -38,20 +38,23 @@ impl Vec101EngineReactExt for Vec101Engine {
                     continue;
                 }
             };
-            
+
             println!("[vec101 ReAct] Received script from LLM.");
 
             // Write the script to a temporary executable file
             let mut temp_dir = env::temp_dir();
             temp_dir.push(format!("vec101_react_script_{}.sh", std::process::id()));
 
-            fs::write(&temp_dir, &script_content).map_err(|e| format!("Failed to write JIT script: {}", e))?;
+            fs::write(&temp_dir, &script_content)
+                .map_err(|e| format!("Failed to write JIT script: {}", e))?;
 
             // Ensure the script is executable
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(&temp_dir).map_err(|e| e.to_string())?.permissions();
+                let mut perms = fs::metadata(&temp_dir)
+                    .map_err(|e| e.to_string())?
+                    .permissions();
                 perms.set_mode(0o755);
                 fs::set_permissions(&temp_dir, perms).map_err(|e| e.to_string())?;
             }
@@ -95,12 +98,12 @@ impl Vec101EngineReactExt for Vec101Engine {
                     "[vec101 ReAct] Attempting to learn usage of '{}' via --help...",
                     failing_cmd
                 );
-                
+
                 let help_output = Command::new("bash")
                     .arg("-c")
                     .arg(format!("{} --help", failing_cmd))
                     .output();
-                    
+
                 let help_text = match help_output {
                     Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
                     Err(_) => "No manual entry available.".to_string(),

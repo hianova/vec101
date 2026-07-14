@@ -15,7 +15,7 @@ pub fn dynamic_quantize_to_int8(input: &[i32]) -> (alloc::vec::Vec<i8>, i32) {
 
     let scale_factor = max_abs / 127;
     let mut quantized = alloc::vec::Vec::with_capacity(input.len());
-    
+
     if scale_factor == 0 {
         for &v in input {
             quantized.push(v.clamp(-128, 127) as i8);
@@ -34,15 +34,19 @@ pub fn dynamic_quantize_to_int8(input: &[i32]) -> (alloc::vec::Vec<i8>, i32) {
 
 /// Reorders the activation memory according to a given routing layout (`I_Stream`).
 /// This prepares the continuous `X_Stream` for `vec101_compute`.
-pub fn memory_reorder(quantized_input: &[i8], i_stream: &[u32], block_size: usize) -> alloc::vec::Vec<i8> {
+pub fn memory_reorder(
+    quantized_input: &[i8],
+    i_stream: &[u32],
+    block_size: usize,
+) -> alloc::vec::Vec<i8> {
     let num_blocks = i_stream.len();
     let total_elements = num_blocks * block_size;
     let mut x_stream = alloc::vec![0i8; total_elements];
-    
+
     for (b_idx, &i_val) in i_stream.iter().enumerate() {
         let src_offset = (i_val as usize) * block_size;
         let dst_offset = b_idx * block_size;
-        
+
         for i in 0..block_size {
             x_stream[dst_offset + i] = quantized_input[(src_offset + i) % quantized_input.len()];
         }
@@ -54,14 +58,18 @@ use crate::core::{Vec101SuperBlock, vec101_block};
 
 /// Packs INT32 model weights into the highly optimized Dual-Rail `Vec101SuperBlock` format.
 /// Applications should use this to load model weights into vec101.
-/// 
+///
 /// # Arguments
 /// * `weights` - The flattened continuous INT32 weight array. Length must be a multiple of 2048.
-/// 
+///
 /// # Panics
 /// Panics if `weights.len()` is not a multiple of 2048.
 pub fn pack_weights_to_superblocks(weights: &[i32]) -> alloc::vec::Vec<Vec101SuperBlock> {
-    assert_eq!(weights.len() % 2048, 0, "Weight length must be a multiple of 2048 for SuperBlock packing");
+    assert_eq!(
+        weights.len() % 2048,
+        0,
+        "Weight length must be a multiple of 2048 for SuperBlock packing"
+    );
     let num_superblocks = weights.len() / 2048;
     let mut superblocks = alloc::vec::Vec::with_capacity(num_superblocks);
 
@@ -70,12 +78,15 @@ pub fn pack_weights_to_superblocks(weights: &[i32]) -> alloc::vec::Vec<Vec101Sup
         let mut sb = Vec101SuperBlock {
             scales: [0; 8],
             offsets: [0; 8],
-            blocks: [vec101_block { w_pos_bits: [0; 4], w_neg_bits: [0; 4] }; 8],
+            blocks: [vec101_block {
+                w_pos_bits: [0; 4],
+                w_neg_bits: [0; 4],
+            }; 8],
         };
 
         for b_idx in 0..8 {
             let block_w = &sb_weights[b_idx * 256..(b_idx + 1) * 256];
-            
+
             // BitNet 1.58-bit Quantization: Scale = Mean Absolute Value
             let mut sum_abs = 0i64;
             for &w in block_w {
@@ -92,7 +103,7 @@ pub fn pack_weights_to_superblocks(weights: &[i32]) -> alloc::vec::Vec<Vec101Sup
             for (i, &w) in block_w.iter().enumerate() {
                 let q = w / scale;
                 let ternary = q.clamp(-1, 1);
-                
+
                 let u64_idx = i / 64;
                 let bit_shift = i % 64;
 
@@ -122,12 +133,12 @@ mod tests {
     fn test_dynamic_quantize() {
         let input = vec![100, 200, -1000, 0];
         let (quantized, scale) = dynamic_quantize_to_int8(&input);
-        
+
         assert_eq!(scale, 1000 / 127);
         assert_eq!(quantized[2], -128); // Note: -1000 / 7 = -142 -> clamped to -128
         assert_eq!(quantized[3], 0);
     }
-    
+
     #[test]
     fn test_memory_reorder() {
         let input = vec![1, 2, 3];
@@ -139,16 +150,16 @@ mod tests {
     #[test]
     fn test_pack_weights_to_superblocks() {
         let mut weights = vec![0i32; 2048];
-        weights[0] = 200;   // Will be +1
-        weights[1] = -200;  // Will be -1
-        weights[64] = 200;  // Next u64 pos_bits
-        
+        weights[0] = 200; // Will be +1
+        weights[1] = -200; // Will be -1
+        weights[64] = 200; // Next u64 pos_bits
+
         let superblocks = pack_weights_to_superblocks(&weights);
         assert_eq!(superblocks.len(), 1);
-        
+
         let sb = &superblocks[0];
         let block0 = &sb.blocks[0];
-        
+
         assert_eq!(block0.w_pos_bits[0] & 1, 1);
         assert_eq!(block0.w_neg_bits[0] & 2, 2);
         assert_eq!(block0.w_pos_bits[1] & 1, 1);
@@ -159,7 +170,7 @@ mod tests {
         let input_zeros = vec![0, 0, 0];
         let (q_zeros, s_zeros) = dynamic_quantize_to_int8(&input_zeros);
         assert_eq!(s_zeros, 1);
-        
+
         let input_small = vec![10, -10];
         let (q_small, s_small) = dynamic_quantize_to_int8(&input_small);
         assert_eq!(s_small, 1);

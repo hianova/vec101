@@ -1,6 +1,6 @@
 #![allow(unused)]
 use std::time::Instant;
-use vec101::core::{vec101_context, QuantType, Vec101SuperBlock};
+use vec101::core::{QuantType, Vec101SuperBlock, vec101_context};
 use vec101::{vec101_block, vec101_compute};
 
 struct XorShift32(u32);
@@ -113,7 +113,7 @@ fn run_engine_benchmark(
     }
     let duration = start.elapsed() / iters as u32;
     let latency_ms = duration.as_secs_f64() * 1000.0;
-    
+
     // Throughput is batch_size tokens processed per duration
     let throughput = (batch_size as f64) / duration.as_secs_f64();
 
@@ -135,25 +135,77 @@ fn run_engine_benchmark(
 
 fn main() {
     println!("# Vec101 Engine Integrated Benchmark\n");
-    
+
     // We simulate a slice of a 3B parameter model to keep bench times reasonable.
     // 1 SuperBlock = 2048 weights.
     let blocks_per_row = 2; // 4096 input features
-    let num_rows = 10000;   // 10000 output features (40.9M parameters total)
+    let num_rows = 10000; // 10000 output features (40.9M parameters total)
 
-    println!("* **Model Scale**     : {} Parameters per layer ({} x {})", num_rows * blocks_per_row * 2048, num_rows, blocks_per_row * 2048);
+    println!(
+        "* **Model Scale**     : {} Parameters per layer ({} x {})",
+        num_rows * blocks_per_row * 2048,
+        num_rows,
+        blocks_per_row * 2048
+    );
     println!("* **Hardware Backend**: ARM NEON / Generic CPU Fallback\n");
 
     let configs = vec![
         // (Name, QuantType, Batch Size, Threads, Iters)
         ("Framework Overhead", QuantType::Bit1_58, 1, 1, 0, 0, 10000), // Zero features to test pure overhead
-        ("Decode (Single-Thread)", QuantType::Bit1_58, 1, 1, num_rows, blocks_per_row, 20),
-        ("Decode (Multi-Thread)", QuantType::Bit1_58, 1, 8, num_rows, blocks_per_row, 20),
-        ("Prefill TTFT (Batch=128)", QuantType::Bit1_58, 128, 8, num_rows, blocks_per_row, 5),
-        
-        ("Decode (Single-Thread)", QuantType::Q4_0, 1, 1, num_rows, blocks_per_row, 20),
-        ("Decode (Multi-Thread)", QuantType::Q4_0, 1, 8, num_rows, blocks_per_row, 20),
-        ("Prefill TTFT (Batch=128)", QuantType::Q4_0, 128, 8, num_rows, blocks_per_row, 5),
+        (
+            "Decode (Single-Thread)",
+            QuantType::Bit1_58,
+            1,
+            1,
+            num_rows,
+            blocks_per_row,
+            20,
+        ),
+        (
+            "Decode (Multi-Thread)",
+            QuantType::Bit1_58,
+            1,
+            8,
+            num_rows,
+            blocks_per_row,
+            20,
+        ),
+        (
+            "Prefill TTFT (Batch=128)",
+            QuantType::Bit1_58,
+            128,
+            8,
+            num_rows,
+            blocks_per_row,
+            5,
+        ),
+        (
+            "Decode (Single-Thread)",
+            QuantType::Q4_0,
+            1,
+            1,
+            num_rows,
+            blocks_per_row,
+            20,
+        ),
+        (
+            "Decode (Multi-Thread)",
+            QuantType::Q4_0,
+            1,
+            8,
+            num_rows,
+            blocks_per_row,
+            20,
+        ),
+        (
+            "Prefill TTFT (Batch=128)",
+            QuantType::Q4_0,
+            128,
+            8,
+            num_rows,
+            blocks_per_row,
+            5,
+        ),
     ];
 
     println!("| Scenario | Quantization | Batch | Threads | Latency (ms) | Throughput (tok/s) |");
@@ -161,7 +213,7 @@ fn main() {
 
     for (name, q_type, batch, threads, rows, blocks, iters) in configs {
         let res = run_engine_benchmark(name, q_type, batch, threads, rows, blocks, iters);
-        
+
         if rows == 0 {
             // Special format for overhead
             println!(
@@ -171,10 +223,15 @@ fn main() {
         } else {
             println!(
                 "| {:<24} | {:<12} | {:>5} | {:>7} | {:>12.3} | {:>18.1} |",
-                res.name, res.quant_type, res.batch_size, res.threads, res.latency_ms, res.throughput
+                res.name,
+                res.quant_type,
+                res.batch_size,
+                res.threads,
+                res.latency_ms,
+                res.throughput
             );
         }
     }
-    
+
     println!("\n*Note: Throughput is measured in tokens/sec for the configured layer size.*");
 }

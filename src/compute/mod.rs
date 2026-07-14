@@ -2,9 +2,9 @@ use crate::core::vec101_context;
 extern crate alloc;
 use alloc::vec;
 
-use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
 #[cfg(feature = "std")]
 use crate::sync::spawn_thread;
+use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
 
 pub mod avx2;
 pub mod neon;
@@ -30,7 +30,9 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
     #[cfg(feature = "cuda")]
     {
         if !ctx.hardware_handle.is_null() {
-            let device = unsafe { &*(ctx.hardware_handle as *const std::sync::Arc<cudarc::driver::CudaDevice>) };
+            let device = unsafe {
+                &*(ctx.hardware_handle as *const std::sync::Arc<cudarc::driver::CudaDevice>)
+            };
             let backend = crate::gpu::cuda::CudaBackend::new(device.clone());
             backend.compute(ctx);
             return;
