@@ -1,6 +1,16 @@
 pub mod llm_traits;
 pub use llm_traits::*;
 
+pub mod builder;
+pub mod engine;
+pub mod kv_cache;
+pub mod sensor;
+pub use builder::ComputeContextBuilder;
+pub use engine::Vec101Engine;
+pub use kv_cache::SharedPrefixManager;
+pub use sensor::ContinuousInput;
+pub mod math;
+pub mod topk;
 /// The fundamental compute block for vec101.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

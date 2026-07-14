@@ -21,6 +21,9 @@ pub mod util;
 
 pub use util::components::{attention, tokenizer};
 
+#[cfg(feature = "std")]
+pub mod react;
+
 
 pub use compute::vec101_compute;
 pub use no_std_tool::debug::{check_memory_leaks, check_thread_drops, ScopedResource};

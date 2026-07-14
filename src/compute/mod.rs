@@ -10,6 +10,9 @@ pub mod avx2;
 pub mod neon;
 pub mod scalar;
 
+#[cfg(feature = "std")]
+pub mod batch;
+
 // ==========================================
 // Main Dispatcher
 // ==========================================
