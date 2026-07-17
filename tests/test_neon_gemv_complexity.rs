@@ -9,6 +9,7 @@ fn test_neon_gemv_complexity() {
         .parse()
         .unwrap_or(10);
 
+    let n = std::hint::black_box(n);
     let blocks_per_row = n;
 
     let batch_size = 5;
@@ -41,4 +42,5 @@ fn test_neon_gemv_complexity() {
     unsafe {
         vec101::compute::neon::process_row_neon_gemm(0, &ctx, &mut row_sums);
     }
+    std::hint::black_box(row_sums);
 }

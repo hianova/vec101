@@ -1,6 +1,6 @@
 /// Dynamically quantizes an INT32 array to INT8 using pure integer arithmetic.
 /// Returns the INT8 array and the dynamic scaling factor.
-pub fn dynamic_quantize_to_int8(input: &[i32]) -> (alloc::vec::Vec<i8>, i32) {
+pub fn dynamic_quantize_to_int8(input: &[i32]) -> (Vec<i8>, i32) {
     let mut max_abs = 0i32;
     for &v in input {
         let abs = v.abs();
@@ -14,7 +14,7 @@ pub fn dynamic_quantize_to_int8(input: &[i32]) -> (alloc::vec::Vec<i8>, i32) {
     }
 
     let scale_factor = max_abs / 127;
-    let mut quantized = alloc::vec::Vec::with_capacity(input.len());
+    let mut quantized = Vec::with_capacity(input.len());
 
     if scale_factor == 0 {
         for &v in input {
@@ -38,7 +38,7 @@ pub fn memory_reorder(
     quantized_input: &[i8],
     i_stream: &[u32],
     block_size: usize,
-) -> alloc::vec::Vec<i8> {
+) -> Vec<i8> {
     let num_blocks = i_stream.len();
     let total_elements = num_blocks * block_size;
     let mut x_stream = alloc::vec![0i8; total_elements];
@@ -64,14 +64,14 @@ use crate::core::{Vec101SuperBlock, vec101_block};
 ///
 /// # Panics
 /// Panics if `weights.len()` is not a multiple of 2048.
-pub fn pack_weights_to_superblocks(weights: &[i32]) -> alloc::vec::Vec<Vec101SuperBlock> {
+pub fn pack_weights_to_superblocks(weights: &[i32]) -> Vec<Vec101SuperBlock> {
     assert_eq!(
         weights.len() % 2048,
         0,
         "Weight length must be a multiple of 2048 for SuperBlock packing"
     );
     let num_superblocks = weights.len() / 2048;
-    let mut superblocks = alloc::vec::Vec::with_capacity(num_superblocks);
+    let mut superblocks = Vec::with_capacity(num_superblocks);
 
     for sb_idx in 0..num_superblocks {
         let sb_weights = &weights[sb_idx * 2048..(sb_idx + 1) * 2048];

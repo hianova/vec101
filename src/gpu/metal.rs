@@ -10,6 +10,12 @@ extern crate alloc;
 pub struct MetalBackend {}
 
 #[cfg(feature = "gpu-metal")]
+impl Default for MetalBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetalBackend {
     pub fn new() -> Self {
         Self {}

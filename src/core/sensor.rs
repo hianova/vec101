@@ -10,7 +10,7 @@ pub trait ContinuousInput {
     fn quantize_continuous_stream(
         &self,
         raw_input: &[f32],
-    ) -> (alloc::vec::Vec<i8>, alloc::vec::Vec<i32>);
+    ) -> (Vec<i8>, Vec<i32>);
 }
 
 impl crate::core::engine::Vec101Engine {

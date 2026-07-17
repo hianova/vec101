@@ -21,8 +21,6 @@ pub mod util;
 
 pub use util::components::{attention, tokenizer};
 
-#[cfg(feature = "std")]
-pub mod react;
 
 pub use compute::vec101_compute;
 pub use core::{vec101_block, vec101_context};
