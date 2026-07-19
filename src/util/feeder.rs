@@ -55,6 +55,7 @@ pub fn memory_reorder(
 }
 
 use crate::core::{Vec101SuperBlock, vec101_block};
+use alloc::vec::Vec;
 
 /// Packs INT32 model weights into the highly optimized Dual-Rail `Vec101SuperBlock` format.
 /// Applications should use this to load model weights into vec101.

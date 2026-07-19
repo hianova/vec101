@@ -44,10 +44,7 @@ impl Vec101Backend for CpuBackend {
             return;
         }
 
-        let in_features = match ctx.quant_type {
-            crate::core::QuantType::Bit1_58 => ctx.blocks_per_row * 2048,
-            crate::core::QuantType::Q4_0 => ctx.blocks_per_row * 256,
-        };
+        let in_features = ctx.blocks_per_row * 2048;
         let padded_batch = (ctx.batch_size + 63) & !63; // Pad to 64 for unrolled registers
 
         #[cfg(not(target_arch = "aarch64"))]

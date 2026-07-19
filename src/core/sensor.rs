@@ -4,6 +4,7 @@
 /// the contract for external quantization tools (like those in `no_std_tool`)
 /// to hook into and provide pre-quantized sequences (e.g. i8 arrays + i32 scales)
 /// without `vec101` needing to reimplement floating-point normalization.
+use alloc::vec::Vec;
 pub trait ContinuousInput {
     /// Takes a continuous float array (e.g. from an audio or robotic sensor)
     /// and returns the quantized `x_stream` bytes and corresponding `s_stream` scales.

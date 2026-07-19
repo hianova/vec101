@@ -1,5 +1,4 @@
 use crate::core::vec101_context;
-extern crate alloc;
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::*;
@@ -22,7 +21,6 @@ pub unsafe fn process_row_neon_gemv(row: usize, ctx: &vec101_context) {
     }
     match ctx.quant_type {
         crate::core::QuantType::Bit1_58 => process_row_neon_gemv_bit1_58(row, ctx),
-        crate::core::QuantType::Q4_0 => process_row_neon_gemv_q4_0(row, ctx),
     }
 }
 
@@ -84,49 +82,7 @@ unsafe fn process_row_neon_gemv_bit1_58(row: usize, ctx: &vec101_context) {
     *out_ptr = (*out_ptr).saturating_add(((final_sum as i64 * scale as i64) >> 16) as i32);
 }
 
-#[cfg(target_arch = "aarch64")]
-unsafe fn process_row_neon_gemv_q4_0(row: usize, ctx: &vec101_context) {
-    let scale = *ctx.s_stream.add(row);
-    let mut final_sum = 0i32;
 
-    let q4_blocks_per_row = ctx.blocks_per_row * 8;
-
-    let mask = vdupq_n_u8(0x0F);
-    let eight = vdupq_n_u8(8);
-
-    for col in 0..q4_blocks_per_row {
-        let block_idx = row * q4_blocks_per_row + col;
-        let w_block = &(*(ctx.w_stream as *const crate::core::BlockQ4_0).add(block_idx));
-
-        let q_vec = vld1q_u8(w_block.qs.as_ptr());
-
-        let q0_u8 = vandq_u8(q_vec, mask);
-        let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
-
-        let q1_u8 = vshrq_n_u8::<4>(q_vec);
-        let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
-
-        let x_ptr = ctx.x_stream.add(col * 32);
-        let x_vecs = vld2q_s8(x_ptr);
-
-        let mut acc = vdupq_n_s32(0);
-        core::arch::asm!(
-            "sdot {acc:v}.4s, {x0:v}.16b, {w0:v}.16b",
-            "sdot {acc:v}.4s, {x1:v}.16b, {w1:v}.16b",
-            acc = inout(vreg) acc,
-            x0 = in(vreg) x_vecs.0,
-            w0 = in(vreg) q0_s8,
-            x1 = in(vreg) x_vecs.1,
-            w1 = in(vreg) q1_s8,
-        );
-
-        let block_sum = vaddvq_s32(acc);
-        final_sum += (block_sum * w_block.d as i32) >> 8;
-    }
-
-    let out_ptr = ctx.out_buffer.add(row);
-    *out_ptr = (*out_ptr).saturating_add(((final_sum as i64 * scale as i64) >> 16) as i32);
-}
 
 #[cold]
 fn branch_unlikely() {}
@@ -141,7 +97,6 @@ pub unsafe fn process_row_neon_gemm(row: usize, ctx: &vec101_context, row_sums: 
     }
     match ctx.quant_type {
         crate::core::QuantType::Bit1_58 => process_row_neon_gemm_bit1_58(row, ctx, row_sums),
-        crate::core::QuantType::Q4_0 => process_row_neon_gemm_q4_0(row, ctx, row_sums),
     }
 }
 
@@ -258,110 +213,4 @@ unsafe fn process_row_neon_gemm_bit1_58(row: usize, ctx: &vec101_context, row_su
     }
 }
 
-#[cfg(target_arch = "aarch64")]
-unsafe fn process_row_neon_gemm_q4_0(row: usize, ctx: &vec101_context, row_sums: &mut [i32]) {
-    let scale = *ctx.s_stream.add(row);
 
-    row_sums[..ctx.batch_size].fill(0);
-
-    let q4_blocks_per_row = ctx.blocks_per_row * 8;
-    let in_features = q4_blocks_per_row * 32;
-
-    let mask = vdupq_n_u8(0x0F);
-    let eight = vdupq_n_u8(8);
-
-    let mut b_idx = 0;
-    while b_idx + 3 < ctx.batch_size {
-        for col in 0..q4_blocks_per_row {
-            let block_idx = row * q4_blocks_per_row + col;
-            let w_block = &(*(ctx.w_stream as *const crate::core::BlockQ4_0).add(block_idx));
-
-            let q_vec = vld1q_u8(w_block.qs.as_ptr());
-            let q0_u8 = vandq_u8(q_vec, mask);
-            let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
-            let q1_u8 = vshrq_n_u8::<4>(q_vec);
-            let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
-
-            let x_ptr0 = ctx.x_stream.add(b_idx * in_features + col * 32);
-            let x_ptr1 = ctx.x_stream.add((b_idx + 1) * in_features + col * 32);
-            let x_ptr2 = ctx.x_stream.add((b_idx + 2) * in_features + col * 32);
-            let x_ptr3 = ctx.x_stream.add((b_idx + 3) * in_features + col * 32);
-
-            let x_vecs0 = vld2q_s8(x_ptr0);
-            let x_vecs1 = vld2q_s8(x_ptr1);
-            let x_vecs2 = vld2q_s8(x_ptr2);
-            let x_vecs3 = vld2q_s8(x_ptr3);
-
-            let mut acc0 = vdupq_n_s32(0);
-            let mut acc1 = vdupq_n_s32(0);
-            let mut acc2 = vdupq_n_s32(0);
-            let mut acc3 = vdupq_n_s32(0);
-
-            core::arch::asm!(
-                "sdot {acc0:v}.4s, {x00:v}.16b, {w0:v}.16b",
-                "sdot {acc0:v}.4s, {x01:v}.16b, {w1:v}.16b",
-                "sdot {acc1:v}.4s, {x10:v}.16b, {w0:v}.16b",
-                "sdot {acc1:v}.4s, {x11:v}.16b, {w1:v}.16b",
-                "sdot {acc2:v}.4s, {x20:v}.16b, {w0:v}.16b",
-                "sdot {acc2:v}.4s, {x21:v}.16b, {w1:v}.16b",
-                "sdot {acc3:v}.4s, {x30:v}.16b, {w0:v}.16b",
-                "sdot {acc3:v}.4s, {x31:v}.16b, {w1:v}.16b",
-                acc0 = inout(vreg) acc0,
-                acc1 = inout(vreg) acc1,
-                acc2 = inout(vreg) acc2,
-                acc3 = inout(vreg) acc3,
-                x00 = in(vreg) x_vecs0.0,
-                x01 = in(vreg) x_vecs0.1,
-                x10 = in(vreg) x_vecs1.0,
-                x11 = in(vreg) x_vecs1.1,
-                x20 = in(vreg) x_vecs2.0,
-                x21 = in(vreg) x_vecs2.1,
-                x30 = in(vreg) x_vecs3.0,
-                x31 = in(vreg) x_vecs3.1,
-                w0 = in(vreg) q0_s8,
-                w1 = in(vreg) q1_s8,
-            );
-
-            let d = w_block.d as i32;
-            row_sums[b_idx] += (vaddvq_s32(acc0) * d) >> 8;
-            row_sums[b_idx + 1] += (vaddvq_s32(acc1) * d) >> 8;
-            row_sums[b_idx + 2] += (vaddvq_s32(acc2) * d) >> 8;
-            row_sums[b_idx + 3] += (vaddvq_s32(acc3) * d) >> 8;
-        }
-        b_idx += 4;
-    }
-
-    while b_idx < ctx.batch_size {
-        for col in 0..q4_blocks_per_row {
-            let block_idx = row * q4_blocks_per_row + col;
-            let w_block = &(*(ctx.w_stream as *const crate::core::BlockQ4_0).add(block_idx));
-
-            let q_vec = vld1q_u8(w_block.qs.as_ptr());
-            let q0_u8 = vandq_u8(q_vec, mask);
-            let q0_s8 = vreinterpretq_s8_u8(vsubq_u8(q0_u8, eight));
-            let q1_u8 = vshrq_n_u8::<4>(q_vec);
-            let q1_s8 = vreinterpretq_s8_u8(vsubq_u8(q1_u8, eight));
-
-            let x_ptr = ctx.x_stream.add(b_idx * in_features + col * 32);
-            let x_vecs = vld2q_s8(x_ptr);
-
-            let mut acc = vdupq_n_s32(0);
-            core::arch::asm!(
-                "sdot {acc:v}.4s, {x0:v}.16b, {w0:v}.16b",
-                "sdot {acc:v}.4s, {x1:v}.16b, {w1:v}.16b",
-                acc = inout(vreg) acc,
-                x0 = in(vreg) x_vecs.0,
-                w0 = in(vreg) q0_s8,
-                x1 = in(vreg) x_vecs.1,
-                w1 = in(vreg) q1_s8,
-            );
-
-            row_sums[b_idx] += (vaddvq_s32(acc) * w_block.d as i32) >> 8;
-        }
-        b_idx += 1;
-    }
-
-    for (b, &sum) in row_sums.iter().enumerate().take(ctx.batch_size) {
-        *ctx.out_buffer.add(b * ctx.num_rows + row) += ((sum as i64 * scale as i64) >> 16) as i32;
-    }
-}

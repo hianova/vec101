@@ -14,10 +14,15 @@ fn test_neon_gemv_complexity() {
 
     let batch_size = 5;
 
-    let mut w_stream = vec![0u8; blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()];
-    let mut x_stream = vec![0i8; blocks_per_row * 2048 * batch_size];
-    let mut s_stream = vec![1i32; 1];
-    let mut out_buffer = vec![0i32; 1];
+    static mut W_STREAM: [u8; 1000 * core::mem::size_of::<Vec101SuperBlock>()] = [0u8; 1000 * core::mem::size_of::<Vec101SuperBlock>()];
+    static mut X_STREAM: [i8; 1000 * 2048 * 5] = [0i8; 1000 * 2048 * 5];
+    static mut S_STREAM: [i32; 1] = [1i32; 1];
+    static mut OUT_BUFFER: [i32; 1] = [0i32; 1];
+    
+    let mut w_stream = unsafe { &mut W_STREAM[..blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()] };
+    let mut x_stream = unsafe { &mut X_STREAM[..blocks_per_row * 2048 * batch_size] };
+    let mut s_stream = unsafe { &mut S_STREAM[..] };
+    let mut out_buffer = unsafe { &mut OUT_BUFFER[..] };
 
     let ctx = vec101_context {
         quant_type: QuantType::Bit1_58,
@@ -37,7 +42,7 @@ fn test_neon_gemv_complexity() {
         hardware_handle: core::ptr::null_mut(),
     };
 
-    let mut row_sums = vec![0i32; batch_size];
+    let mut row_sums = [0i32; 5];
 
     unsafe {
         vec101::compute::neon::process_row_neon_gemm(0, &ctx, &mut row_sums);

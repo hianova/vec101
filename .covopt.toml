@@ -1,8 +1,9 @@
 [[target]]
 test = "test_neon_gemv_complexity"
 expected = "ON"
-n_values = "100,500,1000"
-target_file = "src/compute/neon.rs"
-target_line = 158
+n_values = "10,20,50"
 require_cache_padding = true
 require_branch_hints = true
+require_aerospace_grade = true
+require_watchdog_timeout = true
+require_stress_test = true

@@ -75,49 +75,7 @@ struct BlockQ4_0 {
     unsigned char qs[16];
 };
 
-extern "C" __global__ void vec101_gemv_q4_0(
-    const BlockQ4_0* w_stream,
-    const char* x_stream,
-    const float* s_stream,
-    float* out_buffer,
-    unsigned int blocks_per_row,
-    float x_scale,
-    unsigned int num_rows
-) {
-    unsigned int row = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int batch = blockIdx.y * blockDim.y + threadIdx.y;
-    
-    if (row >= num_rows) return;
-    
-    unsigned int q4_blocks_per_row = blocks_per_row * 8;
-    
-    const BlockQ4_0* row_w_stream = w_stream + (row * q4_blocks_per_row);
-    const char* batch_x_stream = x_stream + (batch * q4_blocks_per_row * 32);
-    
-    float row_sum = 0.0f;
-    
-    for (unsigned int col = 0; col < q4_blocks_per_row; col++) {
-        BlockQ4_0 w_block = row_w_stream[col];
-        // Cast integer half representation to float
-        float micro_scale = (float)w_block.d; 
-        
-        const char* x_ptr = batch_x_stream + (col * 32);
-        
-        int block_sum = 0;
-        for (unsigned int i = 0; i < 16; i++) {
-            unsigned char q = w_block.qs[i];
-            int q0 = (int)(q & 0x0F) - 8;
-            int q1 = (int)(q >> 4) - 8;
-            
-            block_sum += q0 * (int)x_ptr[i * 2];
-            block_sum += q1 * (int)x_ptr[i * 2 + 1];
-        }
-        row_sum += (float)block_sum * micro_scale;
-    }
-    
-    float scale = s_stream[row];
-    out_buffer[batch * num_rows + row] += row_sum * scale; 
-}
+
 "#;
 
 #[cfg(feature = "cuda")]
@@ -208,18 +166,7 @@ impl Vec101Backend for CudaBackend {
                         core::slice::from_raw_parts_mut(ctx.out_buffer as *mut u8, out_len),
                     )
                     .unwrap();
-            }
-        } else if ctx.quant_type == crate::core::QuantType::Q4_0 {
-            let q4_blocks_per_row = ctx.blocks_per_row * 8;
-            let w_len =
-                ctx.num_rows * q4_blocks_per_row * core::mem::size_of::<crate::core::BlockQ4_0>();
-            let s_len = ctx.num_rows * core::mem::size_of::<i32>();
-            let out_len = ctx.batch_size * ctx.num_rows * core::mem::size_of::<i32>();
-            let x_len = ctx.batch_size * q4_blocks_per_row * 32 * core::mem::size_of::<i8>();
-
-            let dev_w = self
-                .device
-                .htod_sync_copy(unsafe { core::slice::from_raw_parts(ctx.w_stream, w_len) })
+            })
                 .unwrap();
             let dev_x = self
                 .device

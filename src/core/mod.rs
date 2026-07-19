@@ -31,19 +31,10 @@ pub struct Vec101SuperBlock {
     pub blocks: [vec101_block; 8],
 }
 
-/// Gemma Q4_0 Block (32 weights packed into 16 bytes + 1 f16 scale = 18 bytes)
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-pub struct BlockQ4_0 {
-    pub d: i16,       // Block Scale (Delta)
-    pub qs: [u8; 16], // 32 個 4-bit 權重打包
-}
-
 /// Supported quantization types for Dual Engine
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuantType {
     Bit1_58,
-    Q4_0,
 }
 
 /// The runtime context for the vec101 engine.
@@ -90,7 +81,6 @@ pub struct DualEngineContext<'a> {
     /// 1. 唯一的一份物理記憶體映射 (Zero-copy)
     pub shared_kv_cache: &'a mut [u8],
     pub shared_weights_1_58b: &'a [u8],
-    pub shared_weights_4b: &'a [u8],
 
     /// 2. 你發明的無鎖信箱 (Lock-free Mailbox)
     pub auto_fill_mailbox: crate::sync::AtomicMailboxU32,
@@ -114,9 +104,6 @@ mod tests {
             blocks: [block1; 8],
         };
         let _ = alloc::format!("{:?}", sb);
-
-        let q4 = BlockQ4_0 { d: 0, qs: [0; 16] };
-        let _ = alloc::format!("{:?}", q4);
 
         let _ = alloc::format!("{:?}", QuantType::Bit1_58);
     }

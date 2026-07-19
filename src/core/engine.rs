@@ -50,6 +50,22 @@ impl Vec101Engine {
         self.ctx.num_rows = rows;
     }
 
+    pub fn set_x_stream(&mut self, ptr: *const i8) {
+        self.ctx.x_stream = ptr;
+    }
+
+    pub fn set_s_stream(&mut self, ptr: *const i32) {
+        self.ctx.s_stream = ptr;
+    }
+
+    pub fn set_batch_size(&mut self, size: usize) {
+        self.ctx.batch_size = size;
+    }
+
+    pub fn set_blocks_per_row(&mut self, blocks: usize) {
+        self.ctx.blocks_per_row = blocks;
+    }
+
     /// Run the computation safely
     pub fn compute(&mut self) {
         unsafe {

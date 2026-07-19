@@ -102,13 +102,15 @@ fn run_engine_benchmark(
 
     // Warmup
     unsafe {
-        vec101_compute(&ctx);
+        vec101_compute(std::hint::black_box(&ctx));
+        std::hint::black_box(());
     }
 
     let start = Instant::now();
     for _ in 0..iters {
         unsafe {
-            vec101_compute(&ctx);
+            vec101_compute(std::hint::black_box(&ctx));
+            std::hint::black_box(());
         }
     }
     let duration = start.elapsed() / iters as u32;
@@ -119,7 +121,6 @@ fn run_engine_benchmark(
 
     let quant_str = match quant_type {
         QuantType::Bit1_58 => "BitNet (1.58b)",
-        QuantType::Q4_0 => "GGUF (Q4_0)",
         _ => "Unknown",
     };
 
@@ -181,7 +182,7 @@ fn main() {
         ),
         (
             "Decode (Single-Thread)",
-            QuantType::Q4_0,
+            QuantType::Bit1_58,
             1,
             1,
             num_rows,
@@ -190,7 +191,7 @@ fn main() {
         ),
         (
             "Decode (Multi-Thread)",
-            QuantType::Q4_0,
+            QuantType::Bit1_58,
             1,
             8,
             num_rows,
@@ -199,7 +200,7 @@ fn main() {
         ),
         (
             "Prefill TTFT (Batch=128)",
-            QuantType::Q4_0,
+            QuantType::Bit1_58,
             128,
             8,
             num_rows,

@@ -1,4 +1,4 @@
-use vec101::core::{BlockQ4_0, Vec101SuperBlock};
+use vec101::core::{Vec101SuperBlock};
 
 pub struct XorShift32(pub u32);
 impl XorShift32 {
@@ -67,38 +67,4 @@ pub fn naive_fp32_compute(
     }
 }
 
-pub fn naive_q4_0_compute(
-    batch_size: usize,
-    num_rows: usize,
-    blocks_per_row: usize,
-    w_stream: &[BlockQ4_0],
-    x_stream: &[i8],
-    s_stream: &[i32],
-    out_buffer: &mut [i32],
-) {
-    let q4_blocks_per_row = blocks_per_row * 8;
-    let in_features = q4_blocks_per_row * 32;
-    for b in 0..batch_size {
-        for r in 0..num_rows {
-            let mut row_sum = 0i32;
-            for col in 0..q4_blocks_per_row {
-                let w_block = &w_stream[r * q4_blocks_per_row + col];
-                let d = w_block.d as i32;
-                let mut block_sum = 0i32;
-                for i in 0..16 {
-                    let q = w_block.qs[i];
-                    let q0 = (q & 0x0F) as i32 - 8;
-                    let q1 = (q >> 4) as i32 - 8;
 
-                    let x0 = x_stream[b * in_features + col * 32 + i * 2] as i32;
-                    let x1 = x_stream[b * in_features + col * 32 + i * 2 + 1] as i32;
-
-                    block_sum += q0 * x0 + q1 * x1;
-                }
-                row_sum += (block_sum * d) >> 8;
-            }
-            let scale = s_stream[r];
-            out_buffer[b * num_rows + r] += ((row_sum as i64 * scale as i64) >> 16) as i32;
-        }
-    }
-}
