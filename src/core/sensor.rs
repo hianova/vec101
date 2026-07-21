@@ -8,10 +8,7 @@ use alloc::vec::Vec;
 pub trait ContinuousInput {
     /// Takes a continuous float array (e.g. from an audio or robotic sensor)
     /// and returns the quantized `x_stream` bytes and corresponding `s_stream` scales.
-    fn quantize_continuous_stream(
-        &self,
-        raw_input: &[f32],
-    ) -> (Vec<i8>, Vec<i32>);
+    fn quantize_continuous_stream(&self, raw_input: &[f32]) -> (Vec<i8>, Vec<i32>);
 }
 
 impl crate::core::engine::Vec101Engine {

@@ -1,32 +1,19 @@
 use crate::core::vec101_context;
 extern crate alloc;
-use alloc::vec;
-
 #[cfg(feature = "std")]
 use crate::sync::spawn_thread;
 use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
-
-pub mod avx2;
-pub mod neon;
-pub mod scalar;
-
+use alloc::vec;
 #[cfg(feature = "std")]
 pub mod batch;
-
-// ==========================================
-// Main Dispatcher
-// ==========================================
-
-/// Main compute dispatcher.
-/// # Safety
-/// Caller must ensure that the provided context contains valid, aligned memory pointers.
+#[doc = " Main compute dispatcher."]
+#[doc = " # Safety"]
+#[doc = " Caller must ensure that the provided context contains valid, aligned memory pointers."]
 pub unsafe fn vec101_compute(ctx: &vec101_context) {
     if ctx.batch_size == 0 || ctx.num_rows == 0 {
         return;
     }
-
     use crate::hal::Vec101Backend;
-
     #[cfg(feature = "cuda")]
     {
         if !ctx.hardware_handle.is_null() {
@@ -38,24 +25,18 @@ pub unsafe fn vec101_compute(ctx: &vec101_context) {
             return;
         }
     }
-
     #[cfg(feature = "gpu-metal")]
     {
-        // Try Metal Backend if handle provided or just natively (for now, MetalBackend::new() does its own setup)
         let backend = crate::gpu::metal::MetalBackend::new();
         backend.compute(ctx);
         return;
     }
-
-    // Fallback to CPU Backend
     let backend = crate::hal::cpu::CpuBackend::new(ctx.num_threads);
     backend.compute(ctx);
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_vec101_compute_early_exit() {
         let ctx = vec101_context {

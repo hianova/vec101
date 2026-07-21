@@ -14,12 +14,14 @@ fn test_neon_gemv_complexity() {
 
     let batch_size = 5;
 
-    static mut W_STREAM: [u8; 1000 * core::mem::size_of::<Vec101SuperBlock>()] = [0u8; 1000 * core::mem::size_of::<Vec101SuperBlock>()];
+    static mut W_STREAM: [u8; 1000 * core::mem::size_of::<Vec101SuperBlock>()] =
+        [0u8; 1000 * core::mem::size_of::<Vec101SuperBlock>()];
     static mut X_STREAM: [i8; 1000 * 2048 * 5] = [0i8; 1000 * 2048 * 5];
     static mut S_STREAM: [i32; 1] = [1i32; 1];
     static mut OUT_BUFFER: [i32; 1] = [0i32; 1];
-    
-    let mut w_stream = unsafe { &mut W_STREAM[..blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()] };
+
+    let mut w_stream =
+        unsafe { &mut W_STREAM[..blocks_per_row * core::mem::size_of::<Vec101SuperBlock>()] };
     let mut x_stream = unsafe { &mut X_STREAM[..blocks_per_row * 2048 * batch_size] };
     let mut s_stream = unsafe { &mut S_STREAM[..] };
     let mut out_buffer = unsafe { &mut OUT_BUFFER[..] };
@@ -45,7 +47,7 @@ fn test_neon_gemv_complexity() {
     let mut row_sums = [0i32; 5];
 
     unsafe {
-        vec101::compute::neon::process_row_neon_gemm(0, &ctx, &mut row_sums);
+        no_std_tool::vec101_compute::simd::neon::process_row_neon_gemm(0, &ctx, &mut row_sums);
     }
     std::hint::black_box(row_sums);
 }

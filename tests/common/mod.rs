@@ -1,4 +1,4 @@
-use vec101::core::{Vec101SuperBlock};
+use vec101::core::Vec101SuperBlock;
 
 pub struct XorShift32(pub u32);
 impl XorShift32 {
@@ -66,5 +66,3 @@ pub fn naive_fp32_compute(
         }
     }
 }
-
-

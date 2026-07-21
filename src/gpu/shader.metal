@@ -16,8 +16,8 @@ struct Vec101SuperBlock {
 kernel void vec101_gemv(
     device const Vec101SuperBlock* w_stream [[buffer(0)]],
     device const vec101_block* x_stream [[buffer(1)]],
-    device const float* s_stream [[buffer(2)]],
-    device float* out_buffer [[buffer(3)]],
+    device const int* s_stream [[buffer(2)]],
+    device int* out_buffer [[buffer(3)]],
     constant uint& blocks_per_row [[buffer(4)]],
     constant float& x_scale [[buffer(5)]],
     constant uint& num_rows [[buffer(6)]],
@@ -52,8 +52,8 @@ kernel void vec101_gemv(
         }
     }
     
-    float scale = s_stream[row];
-    out_buffer[batch * num_rows + row] = row_sum * scale * x_scale;
+    float scale = (float)s_stream[row];
+    out_buffer[batch * num_rows + row] = (int)(row_sum * scale * x_scale);
 }
 
 struct BlockQ4_0 {
@@ -64,8 +64,8 @@ struct BlockQ4_0 {
 kernel void vec101_gemv_q4_0(
     device const BlockQ4_0* w_stream [[buffer(0)]],
     device const char* x_stream [[buffer(1)]],
-    device const float* s_stream [[buffer(2)]],
-    device float* out_buffer [[buffer(3)]],
+    device const int* s_stream [[buffer(2)]],
+    device int* out_buffer [[buffer(3)]],
     constant uint& blocks_per_row [[buffer(4)]],
     constant float& x_scale [[buffer(5)]],
     constant uint& num_rows [[buffer(6)]],
@@ -99,6 +99,6 @@ kernel void vec101_gemv_q4_0(
         row_sum += (float)block_sum * micro_scale;
     }
     
-    float scale = s_stream[row];
-    out_buffer[batch * num_rows + row] += row_sum * scale; // Note: cpu backend does += 
+    float scale = (float)s_stream[row];
+    out_buffer[batch * num_rows + row] += (int)(row_sum * scale); // Note: cpu backend does += 
 }

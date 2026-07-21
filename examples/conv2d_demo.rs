@@ -29,7 +29,17 @@ fn main() {
     let mut col_matrix = vec![0i8; batch * out_h * out_w * padded_inner_dim];
 
     im2col(
-        &image, batch, in_channels, in_h, in_w, k_h, k_w, stride, pad, padded_inner_dim, &mut col_matrix,
+        &image,
+        batch,
+        in_channels,
+        in_h,
+        in_w,
+        k_h,
+        k_w,
+        stride,
+        pad,
+        padded_inner_dim,
+        &mut col_matrix,
     );
 
     let num_patches = out_h * out_w;
