@@ -4,11 +4,9 @@
 
 ## Tech Stack
 - **Bit1_58 Quantization**: Ternary weights (-1, 0, 1) mapping natively to branchless CPU instructions for unprecedented throughput.
-- **Zero-Allocation Memory Architecture**: Strictly relies on pre-allocated scratch buffers (`Vec101EngineBorrow`). Zero dynamic heap allocations on the hot path eliminate garbage collection jitter and OOM panics.
+- **Memory Architecture**: Relies heavily on pre-allocated scratch buffers (`Vec101EngineBorrow`). *(Note: `CpuBackend::compute` currently performs some allocations on the hot path, which is targeted for refactoring).*
 - **Integer-Only Tiled FlashAttention**: A revolutionary custom Attention mechanism that completely replaces Floating Point Unit (FPU) usage with fixed-point `i8/i32` arithmetic, making it ideal for MCUs and low-power ARM cores.
 - **Heterogeneous Backend**: `vec101_context` abstracts execution across pure CPU (NEON/AVX2), Metal GPU, and CUDA backends via conditional compilation flags.
-
-*(Note: Legacy Q4 quantization has been completely removed in favor of the superior Bit1_58 standard.)*
 
 ## Example
 
