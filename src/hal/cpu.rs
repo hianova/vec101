@@ -23,27 +23,48 @@ impl Vec101Backend for CpuBackend {
             self.num_threads
         };
         if !is_gemm && num_threads <= 1 {
+            let in_features = ctx.blocks_per_row * 2048;
+            let mut x_mask = vec![0u64; in_features / 64];
+            let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, in_features) };
+            for f in 0..in_features {
+                if x_slice[f] != 0 {
+                    x_mask[f / 64] |= 1 << (f % 64);
+                }
+            }
+            let x_mask_arc = Arc::new(x_mask);
             for row in 0..ctx.num_rows {
-                no_std_tool::vec101_compute::process_row_gemv_safe(row, ctx);
+                no_std_tool::vec101_compute::process_row_gemv_safe(row, ctx, &x_mask_arc);
             }
             return;
         }
         let in_features = ctx.blocks_per_row * 2048;
         let padded_batch = (ctx.batch_size + 63) & !63;
+        let mut x_mask = vec![0u64; in_features / 64];
         let x_t = if is_gemm {
             let mut t = vec![0i8; in_features * padded_batch];
             let x_slice =
                 unsafe { core::slice::from_raw_parts(ctx.x_stream, ctx.batch_size * in_features) };
             for b in 0..ctx.batch_size {
                 for f in 0..in_features {
-                    t[f * padded_batch + b] = x_slice[b * in_features + f];
+                    let val = x_slice[b * in_features + f];
+                    t[f * padded_batch + b] = val;
+                    if val != 0 {
+                        x_mask[f / 64] |= 1 << (f % 64);
+                    }
                 }
             }
             t
         } else {
+            let x_slice = unsafe { core::slice::from_raw_parts(ctx.x_stream, in_features) };
+            for f in 0..in_features {
+                if x_slice[f] != 0 {
+                    x_mask[f / 64] |= 1 << (f % 64);
+                }
+            }
             vec![]
         };
         let x_t_arc = Arc::new(x_t);
+        let x_mask_arc = Arc::new(x_mask);
         let mut row_sums = vec![0i32; padded_batch];
         let num_threads = if self.num_threads == 0 {
             1
@@ -62,8 +83,9 @@ impl Vec101Backend for CpuBackend {
                 std::thread::scope(|s| {
                     for _ in 0..(num_threads - 1) {
                         let x_t_ref = &x_t_arc;
+                        let x_mask_ref = &x_mask_arc;
                         let rc_ref = &row_counter;
-                        std :: thread :: Builder :: new () . spawn_scoped (s , move | | { let thread_ctx = unsafe { & * (ctx_ptr as * const vec101_context) } ; let mut t_row_sums = vec ! [0i32 ; padded_batch] ; loop { let row = rc_ref . fetch_add (1 , Ordering :: Relaxed) ; if row >= thread_ctx . num_rows { break ; } if is_gemm { no_std_tool::vec101_compute::process_row_gemm_safe(row, thread_ctx, x_t_ref, padded_batch, &mut t_row_sums); } else { no_std_tool::vec101_compute::process_row_gemv_safe(row, thread_ctx); } } }) . unwrap () ;
+                        std :: thread :: Builder :: new () . spawn_scoped (s , move | | { let thread_ctx = unsafe { & * (ctx_ptr as * const vec101_context) } ; let mut t_row_sums = vec ! [0i32 ; padded_batch] ; loop { let row = rc_ref . fetch_add (1 , Ordering :: Relaxed) ; if row >= thread_ctx . num_rows { break ; } if is_gemm { no_std_tool::vec101_compute::process_row_gemm_safe(row, thread_ctx, x_t_ref, x_mask_ref, padded_batch, &mut t_row_sums); } else { no_std_tool::vec101_compute::process_row_gemv_safe(row, thread_ctx, x_mask_ref); } } }) . unwrap () ;
                     }
                     loop {
                         let row = row_counter.fetch_add(1, Ordering::Relaxed);
@@ -71,9 +93,9 @@ impl Vec101Backend for CpuBackend {
                             break;
                         }
                         if is_gemm {
-                            no_std_tool::vec101_compute::process_row_gemm_safe(row, ctx, &x_t_arc, padded_batch, &mut row_sums);
+                            no_std_tool::vec101_compute::process_row_gemm_safe(row, ctx, &x_t_arc, &x_mask_arc, padded_batch, &mut row_sums);
                         } else {
-                            no_std_tool::vec101_compute::process_row_gemv_safe(row, ctx);
+                            no_std_tool::vec101_compute::process_row_gemv_safe(row, ctx, &x_mask_arc);
                         }
                     }
                 });
@@ -81,9 +103,9 @@ impl Vec101Backend for CpuBackend {
         } else {
             for row in 0..ctx.num_rows {
                 if is_gemm {
-                    no_std_tool::vec101_compute::process_row_gemm_safe(row, ctx, &x_t_arc, padded_batch, &mut row_sums);
+                    no_std_tool::vec101_compute::process_row_gemm_safe(row, ctx, &x_t_arc, &x_mask_arc, padded_batch, &mut row_sums);
                 } else {
-                    no_std_tool::vec101_compute::process_row_gemv_safe(row, ctx);
+                    no_std_tool::vec101_compute::process_row_gemv_safe(row, ctx, &x_mask_arc);
                 }
             }
         }
@@ -128,6 +150,11 @@ mod tests {
             kv_blocks: core::ptr::null(),
             num_blocks: 0,
             hardware_handle: core::ptr::null_mut(),
+            enable_liquid: false,
+            dt: 0.0,
+            liquid_state: core::ptr::null_mut(),
+            liquid_tau: core::ptr::null(),
+            liquid_out_buffer: core::ptr::null_mut(),
         };
         backend.compute(&ctx);
         let ctx_gemm = vec101_context {

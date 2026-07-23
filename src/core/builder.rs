@@ -107,28 +107,13 @@ impl ComputeContextBuilder {
             tree_mask: self.tree_mask,
             tree_size: self.tree_size,
             hardware_handle: self.hardware_handle,
+            enable_liquid: false,
+            dt: 0.0,
+            liquid_state: core::ptr::null_mut(),
+            liquid_tau: core::ptr::null(),
+            liquid_out_buffer: core::ptr::null_mut(),
         };
         Vec101Engine::new(ctx)
     }
 
-    pub fn build_noop(self) -> crate::core::noop_engine::NoopEngine {
-        let ctx = vec101_context {
-            quant_type: self.quant_type,
-            w_stream: self.w_stream,
-            x_stream: self.x_stream,
-            s_stream: self.s_stream,
-            out_buffer: ptr::null_mut(),
-            kv_blocks: ptr::null(),
-            num_blocks: self.num_blocks,
-            block_size: self.block_size,
-            batch_size: self.batch_size,
-            num_rows: self.num_rows,
-            blocks_per_row: self.blocks_per_row,
-            num_threads: self.num_threads,
-            tree_mask: self.tree_mask,
-            tree_size: self.tree_size,
-            hardware_handle: self.hardware_handle,
-        };
-        crate::core::noop_engine::NoopEngine::new(ctx)
-    }
 }

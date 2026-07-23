@@ -1,35 +1,45 @@
-# vec101 🚀
+# vec101
 
-A highly optimized, `no_std`, `no_alloc` library for computing 1.58-bit (ternary) weights multiplied by continuous INT8 activations. `vec101` acts as a branchless inference engine capable of extracting maximum hardware utilization across x86_64, Apple Silicon (NEON/Metal), and NVIDIA GPUs (CUDA).
+**vec101** is a bare-metal, highly specialized heterogeneous inference engine designed for LLMs (Large Language Models) and Embodied AI on extreme edge devices.
 
-## Features
+## Tech Stack
+- **Bit1_58 Quantization**: Ternary weights (-1, 0, 1) mapping natively to branchless CPU instructions for unprecedented throughput.
+- **Zero-Allocation Memory Architecture**: Strictly relies on pre-allocated scratch buffers (`Vec101EngineBorrow`). Zero dynamic heap allocations on the hot path eliminate garbage collection jitter and OOM panics.
+- **Integer-Only Tiled FlashAttention**: A revolutionary custom Attention mechanism that completely replaces Floating Point Unit (FPU) usage with fixed-point `i8/i32` arithmetic, making it ideal for MCUs and low-power ARM cores.
+- **Heterogeneous Backend**: `vec101_context` abstracts execution across pure CPU (NEON/AVX2), Metal GPU, and CUDA backends via conditional compilation flags.
 
-- **Extreme SIMD Performance**: Core loops are heavily vectorized utilizing AVX2 (`_mm256_maddubs_epi16`) and NEON (`sdot` via `vdotq_s32`), effectively circumventing standard `if/else` execution penalties.
-- **Cross-Platform GPU Backends**: 
-  - **Apple Metal**: Exploits Unified Memory Architecture (UMA) for true Zero-Copy memory mapping and utilizes `popcount` on native Metal Shading Language (MSL) compute shaders.
-  - **NVIDIA CUDA**: Compiles pure Rust directly to PTX utilizing the cutting-edge `cuda-oxide` framework to leverage NVidia hardware `popcount`.
-- **Zero Allocations & `no_std`**: Completely heapless runtime. The computation context is strictly `no_std` and pointer-driven, avoiding standard library primitives and locks.
-- **INT8 Operator Fusion**: `SwiGLU` and `RMSNorm` are meticulously designed to stay within the INT8 integer space via dynamic Lookup Tables (LUTs) and fixed-point scaling, eliminating FP32 bottlenecks entirely.
+*(Note: Legacy Q4 quantization has been completely removed in favor of the superior Bit1_58 standard.)*
 
-## PERFORMANCE
+## Example
 
-By transforming matrix multiplication into a flattened continuous dual-rail bitmask processor, `vec101` significantly reduces `L1-dcache-misses` and completely avoids scalar branching.
+```rust
+#![no_std]
 
-- Native Apple Silicon M1 (CPU NEON): **~20.24 tok/s** end-to-end decoding rate for a 3B Parameter Model.
-- Micro-benchmark (1.28M ternary accumulations): **~135.28 µs** on CPU SIMD vs. **1.87 ms** scalar baseline (13.8x Speedup).
+use vec101::core::context::{vec101_context, QuantType};
+use vec101::compute::ComputeContextBuilder;
+use vec101::engine::Vec101EngineBorrow;
+use vec101::core::types::Vec101SuperBlock;
 
-### Running Benchmarks
+fn run_inference() {
+    // 1. Pre-allocate all memory to guarantee Zero-Allocation at runtime
+    // For Bit1_58, weights are packed into superblocks
+    let mut w_stream = vec![Vec101SuperBlock::default(); 1024]; 
+    let mut x_stream = vec![0i8; 2048];
+    let mut out_buffer = vec![0i32; 1024];
 
-To verify the core engine latency (using `criterion`):
-```bash
-cargo bench
+    // 2. Build the cross-FFI C-compatible context
+    let ctx = ComputeContextBuilder::new()
+        .batch_size(1)
+        .num_rows(1024)
+        .quant_type(QuantType::Bit1_58)
+        .build(w_stream.as_mut_ptr(), x_stream.as_mut_ptr(), out_buffer.as_mut_ptr())
+        .expect("Failed to initialize vec101 context");
+
+    // 3. Mount the borrow-engine (Zero heap overhead)
+    let mut engine = Vec101EngineBorrow::new(ctx);
+    
+    // 4. Dispatch to the optimal backend (CPU/NEON/Metal/CUDA)
+    // Dynamic routing between GEMV (Decoding) and GEMM (Prefill) based on batch_size
+    engine.compute();
+}
 ```
-
-To run the end-to-end simulated LLM decoding loop:
-```bash
-cargo run --bin run_llm --release
-```
-
-## Architecture Details
-
-For comprehensive details on engineering decisions, ternary bitmask memory layouts (`w_pos_bits`/`w_neg_bits`), and GPU integration, please refer to the [SPEC.md](SPEC.md) and [PERF.md](PERF.md) documents.

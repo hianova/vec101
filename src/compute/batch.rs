@@ -43,7 +43,7 @@ impl Vec101Engine {
             }
             for b in 0..batch_size {
                 let offset = b * self.ctx.num_rows;
-                let mut max_val = core::i32::MIN;
+                let mut max_val = i32::MIN;
                 let mut best_id = 0;
                 for v in 0..self.ctx.num_rows {
                     let val = out_buffer_owner[offset + v];

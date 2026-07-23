@@ -57,4 +57,40 @@ pub trait LlmPipeline<W: WeightProvider, L: LlmLayer<W>> {
         kv_cache: &mut [i8],
         scratch_buffer: &'a mut [i8],
     ) -> Result<&'a [f32], Self::Error>;
+
+    /// Generates tokens in a loop, invoking a callback for each generated token.
+    /// The callback can return `ControlFlow::Break` to interrupt generation early.
+    fn generate_stream<S, F>(
+        &self,
+        prompt_tokens: &[u32],
+        weights: &W,
+        kv_cache: &mut [i8],
+        scratch_buffer: &mut [i8],
+        max_tokens: usize,
+        mut sampler: S,
+        mut on_token: F,
+    ) -> Result<(), Self::Error>
+    where
+        S: FnMut(&[f32]) -> u32,
+        F: FnMut(u32) -> core::ops::ControlFlow<()>,
+    {
+        if prompt_tokens.is_empty() {
+            return Ok(());
+        }
+        
+        let mut current_token = prompt_tokens[prompt_tokens.len() - 1];
+        
+        for _ in 0..max_tokens {
+            let logits = self.generate_step(current_token, weights, kv_cache, scratch_buffer)?;
+            let next_token = sampler(logits);
+            
+            if let core::ops::ControlFlow::Break(_) = on_token(next_token) {
+                break;
+            }
+            
+            current_token = next_token;
+        }
+        
+        Ok(())
+    }
 }

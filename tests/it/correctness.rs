@@ -92,6 +92,11 @@ fn test_vec101_correctness() {
         kv_blocks: std::ptr::null(),
         num_blocks: 0,
         hardware_handle: core::ptr::null_mut(),
+            enable_liquid: false,
+            dt: 0.0,
+            liquid_state: core::ptr::null_mut(),
+            liquid_tau: core::ptr::null(),
+            liquid_out_buffer: core::ptr::null_mut(),
     };
 
     unsafe {
@@ -179,6 +184,11 @@ fn test_ffi_c_interface() {
         kv_blocks: std::ptr::null(),
         num_blocks: 0,
         hardware_handle: core::ptr::null_mut(),
+            enable_liquid: false,
+            dt: 0.0,
+            liquid_state: core::ptr::null_mut(),
+            liquid_tau: core::ptr::null(),
+            liquid_out_buffer: core::ptr::null_mut(),
     };
     unsafe {
         vec101_compute_c(&ctx);

@@ -50,6 +50,11 @@ impl<'a> Vec101EngineBorrow<'a> {
             tree_mask: ptr::null(),
             tree_size: 0,
             hardware_handle: ptr::null_mut(),
+            enable_liquid: false,
+            dt: 0.0,
+            liquid_state: core::ptr::null_mut(),
+            liquid_tau: core::ptr::null(),
+            liquid_out_buffer: core::ptr::null_mut(),
         };
 
         Ok(Self {

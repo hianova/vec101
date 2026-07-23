@@ -18,11 +18,11 @@ use alloc::vec::Vec;
 
 pub mod compute;
 pub mod core;
-pub mod gpu;
 pub mod hal;
 pub mod sync;
 
 pub mod util;
+pub mod compress;
 
 pub use util::components::{attention, tokenizer};
 pub use util::conv::{im2col, pack_conv_weights, conv2d_compute};

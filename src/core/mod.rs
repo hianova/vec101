@@ -11,11 +11,9 @@ pub use sensor::ContinuousInput;
 
 pub mod borrow_engine;
 pub mod sequence_evaluator;
-pub mod noop_engine;
 
 pub use borrow_engine::Vec101EngineBorrow;
 pub use sequence_evaluator::LayerSequenceEvaluator;
-pub use noop_engine::NoopEngine;
 pub mod math;
 pub mod topk;
 pub use no_std_tool::vec101_compute::types::{vec101_block, Vec101SuperBlock, QuantType, vec101_context};
