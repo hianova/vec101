@@ -48,6 +48,8 @@ fn test_neon_gemv_complexity() {
             liquid_state: core::ptr::null_mut(),
             liquid_tau: core::ptr::null(),
             liquid_out_buffer: core::ptr::null_mut(),
+            scratch_buffer: core::ptr::null_mut(),
+            scratch_size: 0,
     };
 
     let mut row_sums = [0i32; 64];
