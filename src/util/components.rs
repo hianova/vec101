@@ -80,7 +80,7 @@ pub mod attention {
                             }
                         }
                         for i in 0..q_len {
-                            let mut m_ij = -999999i32;
+                            let mut m_ij = -999999;
                             for j in 0..k_len {
                                 let val = s_ij[i * k_len + j];
                                 if val > m_ij {
@@ -237,10 +237,9 @@ pub mod tokenizer {
 }
 #[cfg(test)]
 mod additional_tests {
-    use super::*;
     #[test]
     fn test_empty_tokenizer() {
-        let mut tokenizer = crate::util::components::tokenizer::TrieTokenizer::new(0);
+        let tokenizer = crate::util::components::tokenizer::TrieTokenizer::new(0);
         assert_eq!(tokenizer.encode("test"), alloc::vec![0, 0, 0, 0]);
     }
 }

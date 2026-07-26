@@ -1,6 +1,6 @@
 [package]
 name = "vec101"
-version = "1.1.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.97"
 description = "A no_std, branchless, AVX2/NEON/GPU-accelerated 1.58-bit weight engine for maximum inference efficiency."
@@ -17,6 +17,7 @@ gpu-metal = ["metal", "objc"]
 cuda = ["cudarc"]
 
 [dependencies]
+covopt-macro = { workspace = true }
 cudarc = { version = "0.11", optional = true, features = ["cublas", "nvrtc"] }
 no_std_tool = { workspace = true }
 rayon = { version = "1.10", optional = true }

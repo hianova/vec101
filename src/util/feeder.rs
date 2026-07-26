@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn test_dynamic_quantize_edge_cases() {
         let input_zeros = vec![0, 0, 0];
-        let (q_zeros, s_zeros) = dynamic_quantize_to_int8(&input_zeros);
+        let (_q_zeros, s_zeros) = dynamic_quantize_to_int8(&input_zeros);
         assert_eq!(s_zeros, 1);
         let input_small = vec![10, -10];
         let (q_small, s_small) = dynamic_quantize_to_int8(&input_small);

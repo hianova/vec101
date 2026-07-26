@@ -1,4 +1,4 @@
-use vec101::{conv2d_compute, im2col, pack_conv_weights};
+use vec101::{conv2d_compute, im2col, pack_conv_weights, Conv2dParams, Im2ColParams};
 
 fn main() {
     println!("=== vec101 1.58-bit Convolution Demo ===");
@@ -10,8 +10,8 @@ fn main() {
     let in_w = 4;
 
     let mut image = vec![0i8; batch * in_channels * in_h * in_w];
-    for i in 0..image.len() {
-        image[i] = (i as i8 % 5) - 2; // dummy values around -2 to 2
+    for (i, val) in image.iter_mut().enumerate() {
+        *val = (i as i8 % 5) - 2; // dummy values around -2 to 2
     }
 
     // 2. Im2Col Transformation (Kernel=3x3, Stride=1, Pad=1)
@@ -28,19 +28,19 @@ fn main() {
 
     let mut col_matrix = vec![0i8; batch * out_h * out_w * padded_inner_dim];
 
-    im2col(
-        &image,
-        batch,
+    im2col(Im2ColParams {
+        input: &image,
+        batch_size: batch,
         in_channels,
-        in_h,
-        in_w,
-        k_h,
-        k_w,
+        height: in_h,
+        width: in_w,
+        kernel_h: k_h,
+        kernel_w: k_w,
         stride,
-        pad,
+        padding: pad,
         padded_inner_dim,
-        &mut col_matrix,
-    );
+        output: &mut col_matrix,
+    });
 
     let num_patches = out_h * out_w;
     println!(
@@ -51,13 +51,11 @@ fn main() {
     // 3. Setup Weights (OutChannels=8)
     let out_channels = 8;
     let mut weights = vec![0i32; out_channels * inner_dim];
-    for i in 0..weights.len() {
-        weights[i] = if i % 3 == 0 {
-            1
-        } else if i % 3 == 1 {
-            -1
-        } else {
-            0
+    for (i, val) in weights.iter_mut().enumerate() {
+        *val = match i % 3 {
+            0 => 1,
+            1 => -1,
+            _ => 0,
         };
     }
 
@@ -69,22 +67,22 @@ fn main() {
     let mut out_buffer = vec![0i32; batch * out_channels * out_h * out_w];
     let s_stream = vec![1i32; batch]; // mock scaling factors
 
-    conv2d_compute(
-        &image,
-        &blocks,
-        batch,
+    conv2d_compute(Conv2dParams {
+        input: &image,
+        packed_weights: &blocks,
+        batch_size: batch,
         in_channels,
-        in_h,
-        in_w,
+        height: in_h,
+        width: in_w,
         out_channels,
-        k_h,
-        k_w,
+        kernel_h: k_h,
+        kernel_w: k_w,
         stride,
-        pad,
-        &s_stream,
-        &mut col_matrix,
-        &mut out_buffer,
-    );
+        padding: pad,
+        s_stream: &s_stream,
+        im2col_buffer: &mut col_matrix,
+        out_buffer: &mut out_buffer,
+    });
 
     println!(
         "Convolution output shape: [Batch={}, OutChannels={}, H={}, W={}]",
@@ -92,8 +90,8 @@ fn main() {
     );
 
     println!("First few output values:");
-    for i in 0..10.min(out_buffer.len()) {
-        print!("{} ", out_buffer[i]);
+    for val in out_buffer.iter().take(10) {
+        print!("{} ", val);
     }
     println!("\n=== Demo Finished successfully ===");
 }

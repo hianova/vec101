@@ -16,7 +16,9 @@ pub use borrow_engine::Vec101EngineBorrow;
 pub use sequence_evaluator::LayerSequenceEvaluator;
 pub mod math;
 pub mod topk;
-pub use no_std_tool::vec101_compute::types::{vec101_block, Vec101SuperBlock, QuantType, vec101_context};
+pub use no_std_tool::vec101_compute::types::{Vec101Block, Vec101Context, Vec101SuperBlock, QuantType};
+pub use Vec101Block as vec101_block;
+pub use Vec101Context as vec101_context;
 #[doc = " The Heterogeneous Compute Hub interface (Dual Engine)"]
 #[repr(C, align(64))]
 pub struct DualEngineContext<'a> {

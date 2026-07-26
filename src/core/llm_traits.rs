@@ -3,6 +3,12 @@
 
 use core::result::Result;
 
+/// Execution buffers required for model inference.
+pub struct ExecutionBuffers<'a> {
+    pub kv_cache: &'a mut [i8],
+    pub scratch_buffer: &'a mut [i8],
+}
+
 /// Provides read-only access to model weights.
 /// Implemented by the application layer to feed safetensors or mmapped files into the core.
 pub trait WeightProvider {
@@ -64,8 +70,7 @@ pub trait LlmPipeline<W: WeightProvider, L: LlmLayer<W>> {
         &self,
         prompt_tokens: &[u32],
         weights: &W,
-        kv_cache: &mut [i8],
-        scratch_buffer: &mut [i8],
+        buffers: ExecutionBuffers<'_>,
         max_tokens: usize,
         mut sampler: S,
         mut on_token: F,
@@ -79,6 +84,7 @@ pub trait LlmPipeline<W: WeightProvider, L: LlmLayer<W>> {
         }
         
         let mut current_token = prompt_tokens[prompt_tokens.len() - 1];
+        let ExecutionBuffers { kv_cache, scratch_buffer } = buffers;
         
         for _ in 0..max_tokens {
             let logits = self.generate_step(current_token, weights, kv_cache, scratch_buffer)?;

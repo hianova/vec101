@@ -57,13 +57,17 @@ fn test_stream_interruption() {
         42
     };
     
+    use vec101::core::llm_traits::ExecutionBuffers;
+
     let result = pipeline.generate_stream(
-        &[1, 2, 3], 
-        &weights, 
-        &mut kv_cache, 
-        &mut scratch_buffer, 
-        100, // max tokens
-        sampler, 
+        &[1, 2, 3],
+        &weights,
+        ExecutionBuffers {
+            kv_cache: &mut kv_cache,
+            scratch_buffer: &mut scratch_buffer,
+        },
+        100,
+        sampler,
         |_next_token| {
             tokens_generated += 1;
             if tokens_generated == 5 {
@@ -71,7 +75,7 @@ fn test_stream_interruption() {
             } else {
                 ControlFlow::Continue(())
             }
-        }
+        },
     );
     
     assert!(result.is_ok());

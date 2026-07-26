@@ -1,10 +1,6 @@
 use crate::core::vec101_context;
 extern crate alloc;
 #[cfg(feature = "std")]
-use crate::sync::spawn_thread;
-use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
-use alloc::vec;
-#[cfg(feature = "std")]
 pub mod batch;
 #[doc = " Main compute dispatcher."]
 #[doc = " # Safety"]

@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::time::Instant;
 use vec101::core::{QuantType, Vec101SuperBlock, vec101_context};
 use vec101::{vec101_block, vec101_compute};
@@ -115,7 +114,8 @@ fn run_engine_benchmark(
     }
 
     let start = Instant::now();
-    for _ in 0..iters {
+    for i in 0..iters {
+        let _i = std::hint::black_box(i);
         unsafe {
             vec101_compute(std::hint::black_box(&ctx));
             std::hint::black_box(());
@@ -129,7 +129,6 @@ fn run_engine_benchmark(
 
     let quant_str = match quant_type {
         QuantType::Bit1_58 => "BitNet (1.58b)",
-        _ => "Unknown",
     };
 
     BenchResult {

@@ -22,10 +22,10 @@ impl crate::core::engine::Vec101Engine {
         // buffer or arena. For now, we update the context pointers.
         // WARNING: Pointer lifetime is only safe if engine owns or borrows properly.
         // As a prototype architectural shell, we just expose the interface.
-        self.ctx.x_stream = x_stream.as_ptr();
-        self.ctx.s_stream = s_stream.as_ptr();
+        self.context.x_stream = x_stream.as_ptr();
+        self.context.s_stream = s_stream.as_ptr();
 
         // Ensure the engine knows how many tokens (or sensor frames) it's processing
-        // self.ctx.batch_size = ...;
+        // self.context.batch_size = ...;
     }
 }

@@ -1,4 +1,3 @@
-#![allow(clippy::too_many_arguments)]
 use crate::compute::vec101_compute;
 use crate::core::QuantType;
 use crate::core::Vec101SuperBlock;
@@ -6,67 +5,82 @@ use crate::core::vec101_context;
 use crate::util::feeder::pack_weights_to_superblocks;
 use alloc::vec::Vec;
 use core::ptr;
+
+#[doc = " Parameters for image-to-column conversion."]
+pub struct Im2ColParams<'a> {
+    pub input: &'a [i8],
+    pub batch_size: usize,
+    pub in_channels: usize,
+    pub height: usize,
+    pub width: usize,
+    pub kernel_h: usize,
+    pub kernel_w: usize,
+    pub stride: usize,
+    pub padding: usize,
+    pub padded_inner_dim: usize,
+    pub output: &'a mut [i8],
+}
+
+#[doc = " Parameters for 2D convolution computation."]
+pub struct Conv2dParams<'a> {
+    pub input: &'a [i8],
+    pub packed_weights: &'a [Vec101SuperBlock],
+    pub batch_size: usize,
+    pub in_channels: usize,
+    pub height: usize,
+    pub width: usize,
+    pub out_channels: usize,
+    pub kernel_h: usize,
+    pub kernel_w: usize,
+    pub stride: usize,
+    pub padding: usize,
+    pub s_stream: &'a [i32],
+    pub im2col_buffer: &'a mut [i8],
+    pub out_buffer: &'a mut [i32],
+}
+
 #[doc = " Converts a 4D image tensor into a 2D column matrix, with native padding for vec101 SuperBlocks."]
-#[doc = " "]
-#[doc = " `input` shape: `(batch_size, in_channels, height, width)`"]
-#[doc = " `output` buffer size: `batch_size * out_h * out_w * padded_inner_dim`"]
-#[doc = " "]
-#[doc = " To remain `no_alloc` compliant, this function requires the caller to provide"]
-#[doc = " a pre-allocated mutable slice `output` of the exact required size. The inner"]
-#[doc = " dimension (`in_channels * kernel_h * kernel_w`) is padded automatically to `padded_inner_dim`."]
-pub fn im2col(
-    input: &[i8],
-    batch_size: usize,
-    in_channels: usize,
-    height: usize,
-    width: usize,
-    kernel_h: usize,
-    kernel_w: usize,
-    stride: usize,
-    padding: usize,
-    padded_inner_dim: usize,
-    output: &mut [i8],
-) {
-    let out_h = (height + 2 * padding - kernel_h) / stride + 1;
-    let out_w = (width + 2 * padding - kernel_w) / stride + 1;
-    let expected_len = batch_size * out_h * out_w * padded_inner_dim;
-    assert_eq!(output.len(), expected_len, "Output buffer size mismatch");
+pub fn im2col(p: Im2ColParams<'_>) {
+    let out_h = (p.height + 2 * p.padding - p.kernel_h) / p.stride + 1;
+    let out_w = (p.width + 2 * p.padding - p.kernel_w) / p.stride + 1;
+    let expected_len = p.batch_size * out_h * out_w * p.padded_inner_dim;
+    assert_eq!(p.output.len(), expected_len, "Output buffer size mismatch");
     let mut out_idx = 0;
-    let inner_dim = in_channels * kernel_h * kernel_w;
+    let inner_dim = p.in_channels * p.kernel_h * p.kernel_w;
     assert!(
-        padded_inner_dim >= inner_dim,
+        p.padded_inner_dim >= inner_dim,
         "Padded inner dim is too small"
     );
-    for b in 0..batch_size {
+    for b in 0..p.batch_size {
         for oh in 0..out_h {
             for ow in 0..out_w {
                 let mut local_inner = 0;
-                for c in 0..in_channels {
-                    for kh in 0..kernel_h {
-                        for kw in 0..kernel_w {
-                            let ih = (oh * stride + kh) as isize - padding as isize;
-                            let iw = (ow * stride + kw) as isize - padding as isize;
+                for c in 0..p.in_channels {
+                    for kh in 0..p.kernel_h {
+                        for kw in 0..p.kernel_w {
+                            let ih = (oh * p.stride + kh) as isize - p.padding as isize;
+                            let iw = (ow * p.stride + kw) as isize - p.padding as isize;
                             let val = if ih >= 0
-                                && ih < height as isize
+                                && ih < p.height as isize
                                 && iw >= 0
-                                && iw < width as isize
+                                && iw < p.width as isize
                             {
-                                let in_idx = b * (in_channels * height * width)
-                                    + c * (height * width)
-                                    + (ih as usize) * width
+                                let in_idx = b * (p.in_channels * p.height * p.width)
+                                    + c * (p.height * p.width)
+                                    + (ih as usize) * p.width
                                     + (iw as usize);
-                                input[in_idx]
+                                p.input[in_idx]
                             } else {
                                 0
                             };
-                            output[out_idx] = val;
+                            p.output[out_idx] = val;
                             out_idx += 1;
                             local_inner += 1;
                         }
                     }
                 }
-                while local_inner < padded_inner_dim {
-                    output[out_idx] = 0;
+                while local_inner < p.padded_inner_dim {
+                    p.output[out_idx] = 0;
                     out_idx += 1;
                     local_inner += 1;
                 }
@@ -75,9 +89,6 @@ pub fn im2col(
     }
 }
 #[doc = " Packs standard convolution weights `(C_out, C_in, K_h, K_w)` into `Vec101SuperBlock`s."]
-#[doc = " "]
-#[doc = " The inner dimension `C_in * K_h * K_w` is automatically padded with zeros to be a "]
-#[doc = " multiple of 2048 elements (1 SuperBlock), which is required by `vec101_compute`."]
 pub fn pack_conv_weights(
     weights: &[i32],
     out_channels: usize,
@@ -97,67 +108,49 @@ pub fn pack_conv_weights(
     pack_weights_to_superblocks(&padded_weights)
 }
 #[doc = " Dispatches a Convolution operation down to the `vec101` GEMM engine."]
-#[doc = " "]
-#[doc = " This acts as the operator bridge separating CNN mathematics from LLM logic."]
-#[doc = " The function strictly avoids hidden heap allocations by requiring pre-allocated buffers."]
-pub fn conv2d_compute(
-    input: &[i8],
-    packed_weights: &[Vec101SuperBlock],
-    batch_size: usize,
-    in_channels: usize,
-    height: usize,
-    width: usize,
-    out_channels: usize,
-    kernel_h: usize,
-    kernel_w: usize,
-    stride: usize,
-    padding: usize,
-    s_stream: &[i32],
-    im2col_buffer: &mut [i8],
-    out_buffer: &mut [i32],
-) {
-    let out_h = (height + 2 * padding - kernel_h) / stride + 1;
-    let out_w = (width + 2 * padding - kernel_w) / stride + 1;
-    let inner_dim = in_channels * kernel_h * kernel_w;
+pub fn conv2d_compute(p: Conv2dParams<'_>) {
+    let out_h = (p.height + 2 * p.padding - p.kernel_h) / p.stride + 1;
+    let out_w = (p.width + 2 * p.padding - p.kernel_w) / p.stride + 1;
+    let inner_dim = p.in_channels * p.kernel_h * p.kernel_w;
     let padded_inner_dim = inner_dim.div_ceil(2048) * 2048;
-    im2col(
-        input,
-        batch_size,
-        in_channels,
-        height,
-        width,
-        kernel_h,
-        kernel_w,
-        stride,
-        padding,
+    im2col(Im2ColParams {
+        input: p.input,
+        batch_size: p.batch_size,
+        in_channels: p.in_channels,
+        height: p.height,
+        width: p.width,
+        kernel_h: p.kernel_h,
+        kernel_w: p.kernel_w,
+        stride: p.stride,
+        padding: p.padding,
         padded_inner_dim,
-        im2col_buffer,
-    );
-    let num_rows_x = batch_size * out_h * out_w;
+        output: p.im2col_buffer,
+    });
+    let num_rows_x = p.batch_size * out_h * out_w;
     let blocks_per_row = padded_inner_dim / 2048;
     let ctx = vec101_context {
         quant_type: QuantType::Bit1_58,
-        w_stream: packed_weights.as_ptr() as *const u8,
-        x_stream: im2col_buffer.as_ptr(),
-        s_stream: s_stream.as_ptr(),
-        out_buffer: out_buffer.as_mut_ptr(),
+        w_stream: p.packed_weights.as_ptr() as *const u8,
+        x_stream: p.im2col_buffer.as_ptr(),
+        s_stream: p.s_stream.as_ptr(),
+        out_buffer: p.out_buffer.as_mut_ptr(),
         kv_blocks: ptr::null(),
         num_blocks: 0,
         block_size: 256,
         batch_size: num_rows_x,
-        num_rows: out_channels,
+        num_rows: p.out_channels,
         blocks_per_row,
         num_threads: 1,
         tree_mask: ptr::null(),
         tree_size: 0,
         hardware_handle: ptr::null_mut(),
-            enable_liquid: false,
-            dt: 0.0,
-            liquid_state: core::ptr::null_mut(),
-            liquid_tau: core::ptr::null(),
-            liquid_out_buffer: core::ptr::null_mut(),
-            scratch_buffer: core::ptr::null_mut(),
-            scratch_size: 0,
+        enable_liquid: false,
+        dt: 0.0,
+        liquid_state: core::ptr::null_mut(),
+        liquid_tau: core::ptr::null(),
+        liquid_out_buffer: core::ptr::null_mut(),
+        scratch_buffer: core::ptr::null_mut(),
+        scratch_size: 0,
     };
     unsafe {
         vec101_compute(&ctx);
@@ -174,7 +167,19 @@ mod tests {
         let out_h = 2;
         let out_w = 2;
         let mut im2col_buf = vec![0i8; out_h * out_w * padded_dim];
-        im2col(&input, 1, 1, 3, 3, 2, 2, 1, 0, padded_dim, &mut im2col_buf);
+        im2col(Im2ColParams {
+            input: &input,
+            batch_size: 1,
+            in_channels: 1,
+            height: 3,
+            width: 3,
+            kernel_h: 2,
+            kernel_w: 2,
+            stride: 1,
+            padding: 0,
+            padded_inner_dim: padded_dim,
+            output: &mut im2col_buf,
+        });
         assert_eq!(&im2col_buf[0..4], &[1, 2, 4, 5]);
         assert_eq!(im2col_buf[4], 0);
         assert_eq!(&im2col_buf[padded_dim..padded_dim + 4], &[2, 3, 5, 6]);

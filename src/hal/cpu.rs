@@ -1,10 +1,7 @@
 use crate::core::vec101_context;
 use crate::hal::Vec101Backend;
+use crate::sync::{AtomicUsize, Ordering};
 extern crate alloc;
-#[cfg(feature = "std")]
-use crate::sync::spawn_thread;
-use crate::sync::{Arc, AtomicUsize, Ordering, spin_loop};
-use alloc::vec;
 #[repr(C, align(64))]
 pub struct CpuBackend {
     pub num_threads: usize,
@@ -185,11 +182,11 @@ mod tests {
     fn test_cpu_backend_coverage() {
         let backend = CpuBackend::new(0);
         assert_eq!(backend.num_threads, 0);
-        let batch_size = 1;
+        let _batch_size = 1;
         let num_rows = 1;
         let blocks_per_row = 1;
-        let mut x_stream = alloc :: vec ! [0i8 ; 2048];
-        let mut w_stream = alloc::vec![Vec101SuperBlock {
+        let x_stream = alloc :: vec ! [0i8 ; 2048];
+        let w_stream = alloc::vec![Vec101SuperBlock {
             scales: [0; 8],
             offsets: [0; 8],
             _padding: [0; 32],
@@ -198,7 +195,7 @@ mod tests {
                 w_neg_bits: [0; 4]
             }; 8]
         }];
-        let mut s_stream = alloc :: vec ! [1i32 ; 1];
+        let s_stream = alloc :: vec ! [1i32 ; 1];
         let mut out_buffer = alloc :: vec ! [0i32 ; 1];
         let ctx = vec101_context {
             quant_type: QuantType::Bit1_58,
@@ -225,11 +222,7 @@ mod tests {
             scratch_size: 0,
         };
         backend.compute(&ctx);
-        let ctx_gemm = vec101_context {
-            batch_size: 2,
-            ..ctx
-        };
-        let mut x_stream_gemm = alloc :: vec ! [0i8 ; 4096];
+        let x_stream_gemm = alloc :: vec ! [0i8 ; 4096];
         let mut out_buffer_gemm = alloc :: vec ! [0i32 ; 2];
         let ctx_gemm2 = vec101_context {
             batch_size: 2,

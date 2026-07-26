@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use no_std_tool::compress::{zigzag_encode_i32, zigzag_decode_u32, leb128_encode_u32, leb128_decode_u32};
 
 pub struct VecTimeSeriesEncoder {
@@ -21,9 +20,7 @@ impl VecTimeSeriesEncoder {
 
         // Prepare shifted array for vectorized subtraction
         shifted[0] = self.last_value;
-        for i in 1..8 {
-            shifted[i] = input[i - 1];
-        }
+        shifted[1..8].copy_from_slice(&input[..7]);
         
         // Auto-vectorizable vector subtraction
         for i in 0..8 {
@@ -38,8 +35,8 @@ impl VecTimeSeriesEncoder {
 
         // Scalar packing (LEB128 produces variable length output)
         let mut offset = 0;
-        for i in 0..8 {
-            offset += leb128_encode_u32(zigzags[i], &mut out_buf[offset..]);
+        for &zz in &zigzags {
+            offset += leb128_encode_u32(zz, &mut out_buf[offset..]);
         }
         
         offset
@@ -62,9 +59,9 @@ impl VecTimeSeriesDecoder {
         let mut offset = 0;
         
         // Scalar unpacking (LEB128 is variable length)
-        for i in 0..8 {
+        for zz in &mut zigzags {
             if let Some((val, bytes_read)) = leb128_decode_u32(&in_buf[offset..]) {
-                zigzags[i] = val;
+                *zz = val;
                 offset += bytes_read;
             } else {
                 return 0; // Error or incomplete buffer

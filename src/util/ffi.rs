@@ -6,8 +6,10 @@ use crate::core::vec101_context;
 #[doc = " # Safety"]
 #[doc = " Performs raw pointer dereferences. The caller MUST provide a valid pointer."]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn vec101_compute_c(ctx: *const vec101_context) {
-    if !ctx.is_null() {
-        vec101_compute(&*ctx);
+pub unsafe extern "C" fn vec101_compute_c(context: *const vec101_context) {
+    if !context.is_null() {
+        unsafe {
+            vec101_compute(&*context);
+        }
     }
 }
